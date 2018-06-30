@@ -1,0 +1,4 @@
+#! /bin/sh
+
+/bin/mount -a
+/bin/hostname -F /etc/hostname

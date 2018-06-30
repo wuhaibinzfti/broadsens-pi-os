@@ -1,0 +1,14 @@
+# /etc/profile: system-wide .profile file for the Bourne shells
+
+echo
+echo -n "Processing /etc/profile... "
+
+HOSTNAM=`/bin/hostname`
+PS1='[\u@\h \W]\# '
+export PS1 HOSTNAME
+
+# network config
+ifconfig eth0 up
+
+echo "Done"
+echo
