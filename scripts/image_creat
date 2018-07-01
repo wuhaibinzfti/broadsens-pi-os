@@ -1,0 +1,21 @@
+#! /bin/sh
+
+IMG_NAME="broadsens"
+
+cd ..
+sudo dd if=/dev/zero of=${IMG_NAME}.img bs=512 count=4194304
+sudo parted ${IMG_NAME}.img --script -- mklabel msdos
+sudo parted ${IMG_NAME}.img --script -- mkpart primary fat32 2048s 65535s
+sudo parted ${IMG_NAME}.img --script -- mkpart primary ext4 65536s -1
+
+loopdevice=`sudo losetup -f --show ${IMG_NAME}.img`
+device=`sudo kpartx -va $loopdevice | sed -E 's/.*(loop[0-9])p.*/\1/g' | head -1`
+device="/dev/mapper/${device}"
+partBoot="${device}p1"
+partRoot="${device}p2"
+
+sudo mkfs.vfat $partBoot
+sudo mkfs.ext4 $partRoot
+
+kpartx -d $loopdevice
+losetup -d $loopdevice
