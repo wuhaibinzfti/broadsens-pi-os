@@ -1,29 +1,33 @@
-#! /bin/sh
+#!/bin/sh
 
 IMG_NAME="broadsens"
 
 cd ..
-#sudo dd if=/dev/zero of=${IMG_NAME}.img bs=512 count=4194304
-#sudo parted ${IMG_NAME}.img --script -- mklabel msdos
-#sudo parted ${IMG_NAME}.img --script -- mkpart primary fat32 2048s 65535s
-#sudo parted ${IMG_NAME}.img --script -- mkpart primary ext4 65536s -1
+sudo rm -rf build/${IMG_NAME}.img
+sudo dd if=/dev/zero of=build/${IMG_NAME}.img bs=512 count=2097152
+sudo parted build/${IMG_NAME}.img --script -- mklabel msdos
+sudo parted build/${IMG_NAME}.img --script -- mkpart primary fat32 2048s 65535s
+sudo parted build/${IMG_NAME}.img --script -- mkpart primary ext4 65536s -1
 
-loopdevice=`sudo losetup -f --show ${IMG_NAME}.img`
+loopdevice=`sudo losetup -f --show build/${IMG_NAME}.img`
 device=`sudo kpartx -va $loopdevice | sed -E 's/.*(loop[0-9])p.*/\1/g' | head -1`
 device="/dev/mapper/${device}"
 partBoot="${device}p1"
 partRoot="${device}p2"
+sleep 1
 
-#sudo mkfs.vfat $partBoot
-#sudo mkfs.ext4 $partRoot
+sudo mkfs.vfat $partBoot
+sudo mkfs.ext4 $partRoot
+sleep 1
 
 sudo mount -t vfat $partBoot /mnt
 sudo cp -rfp boot/* /mnt
 sudo umount /mnt
 
-mount -t ext4 $partRoot /mnt
-sudo cp -rfp rootfs/* /mnt
+sudo mount -t ext4 $partRoot /mnt
+sudo cp -rfp build/rootfs/* /mnt
 sudo umount /mnt
 
-kpartx -d $loopdevice
-losetup -d $loopdevice
+sudo kpartx -d $loopdevice
+sudo losetup -d $loopdevice
+
