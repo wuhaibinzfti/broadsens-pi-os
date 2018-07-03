@@ -1,4 +1,34 @@
 #! /bin/sh
 
+# for mount devpts
+mkdir -p /dev/pts
+
 /bin/mount -a
 /bin/hostname -F /etc/hostname
+
+# modules load
+modprobe rfkill
+modprobe cfg80211
+modprobe brcmutil
+modprobe brcmfmac
+sleep 1
+
+# network config
+#wpa_supplicant -i wlan0 -c /etc/wpa_supplicant.conf &
+ifconfig eth0 up
+#ifconfig wlan0 up
+#ifconfig wlan0 192.168.0.189
+
+
+
+# telnet up
+if [ -x /sbin/telnetd ];
+then
+    telnetd&
+fi
+
+# ftp up
+if [ -x /bin/tcpsvd ];
+then
+    tcpsvd 0 21 ftpd -w /home &
+fi

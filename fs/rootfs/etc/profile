@@ -3,12 +3,12 @@
 echo
 echo -n "Processing /etc/profile... "
 
+
+export PATH=/sbin:/usr/sbin:/bin:/usr/bin
+
 HOSTNAM=`/bin/hostname`
 PS1='[\u@\h \W]\# '
 export PS1 HOSTNAME
-
-# network config
-ifconfig eth0 up
 
 echo "Done"
 echo
