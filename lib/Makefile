@@ -43,7 +43,11 @@ wpa_supplicant-config:
 	echo CONFIG_LIBNL32=y >> $(LIB_WPA_SUPPLICANT_DIR)/.config
 	echo CC=$(CROSS_COMPILE)gcc >> $(LIB_WPA_SUPPLICANT_DIR)/.config
 wpa_supplicant:
-	make -C $(LIB_WPA_SUPPLICANT_DIR) CC=$(CROSS_COMPILE)gcc 
+	make -C $(LIB_WPA_SUPPLICANT_DIR) CC=$(CROSS_COMPILE)gcc
+	mkdir -p $(LIB_INSTALL_DIR)/wpa_supplicant
+	cp -af $(LIB_WPA_SUPPLICANT_DIR)/wpa_cli $(LIB_INSTALL_DIR)/wpa_supplicant/
+	cp -af $(LIB_WPA_SUPPLICANT_DIR)/wpa_passphrase $(LIB_INSTALL_DIR)/wpa_supplicant/
+	cp -af $(LIB_WPA_SUPPLICANT_DIR)/wpa_supplicant $(LIB_INSTALL_DIR)/wpa_supplicant/
 wpa_supplicant-clean:
 	make -C $(LIB_WPA_SUPPLICANT_DIR) CC=$(CROSS_COMPILE)gcc clean
 	
