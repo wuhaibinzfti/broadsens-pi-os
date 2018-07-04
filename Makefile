@@ -44,8 +44,8 @@ kernel-config:
 	
 kernel:
 	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 zImage -j4
-	rm ./kernel7.img -rf
-	$(KERNEL_SRC_DIR)/scripts/mkknlimg $(KERNEL_SRC_DIR)/arch/arm/boot/zImage ./kernel7.img
+	rm -rf $(PWD)/boot/kernel7.img
+	$(KERNEL_SRC_DIR)/scripts/mkknlimg $(KERNEL_SRC_DIR)/arch/arm/boot/zImage $(PWD)/boot/kernel7.img
 	
 kernel-distclean:
 	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 distclean
@@ -85,10 +85,14 @@ rootfs:
 	mkdir -p $(ROOTFS_BUILD_DIR)/home/pi $(ROOTFS_BUILD_DIR)/root $(ROOTFS_BUILD_DIR)/mnt $(ROOTFS_BUILD_DIR)/var/run/wpa_supplicant \
 	         $(ROOTFS_BUILD_DIR)/dev $(ROOTFS_BUILD_DIR)/proc $(ROOTFS_BUILD_DIR)/sys $(ROOTFS_BUILD_DIR)/root $(ROOTFS_BUILD_DIR)/tmp
 	cp -af $(ROOTFS_SRC_DIR)/etc $(ROOTFS_BUILD_DIR)
-	cp -af $(ROOTFS_SRC_DIR)/lib/* $(ROOTFS_BUILD_DIR)/lib
+	cp -af $(LIB_DIR)/libtoolchain/* $(ROOTFS_BUILD_DIR)/lib
+	cp -af $(LIB_DIR)/firmware $(ROOTFS_BUILD_DIR)/lib/
+	cp -af $(LIB_DIR)/output/libnl/lib/libnl-3.so* $(ROOTFS_BUILD_DIR)/lib
+	cp -af $(LIB_DIR)/output/libnl/lib/libnl-genl-3.so* $(ROOTFS_BUILD_DIR)/lib
+	cp -af $(LIB_DIR)/output/openssl/lib/*.so* $(ROOTFS_BUILD_DIR)/lib
 	mkdir -p $(ROOTFS_BUILD_DIR)/lib/modules/4.9.80-v7
 	cp -af $(KERNEL_MOD_BUILD_DIR)/lib/modules/4.9.80-v7/kernel/* $(ROOTFS_BUILD_DIR)/lib/modules/4.9.80-v7
-	cp -af $(ROOTFS_SRC_DIR)/sbin/* $(ROOTFS_BUILD_DIR)/sbin
+	cp -af $(LIB_DIR)/output/wpa_supplicant/* $(ROOTFS_BUILD_DIR)/sbin
 	rm -rf $(ROOTFS_BUILD_DIR)/linuxrc
 	
 wireless_tool:
