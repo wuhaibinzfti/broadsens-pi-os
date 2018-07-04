@@ -1,0 +1,9 @@
+prefix=/home/broadsens/wuhaibin/code/pi-os/20180704_pi-os/broadsens-pi-os/lib/output/openssl
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: OpenSSL
+Description: Secure Sockets Layer and cryptography libraries and tools
+Version: 1.0.2o
+Requires: libssl libcrypto
