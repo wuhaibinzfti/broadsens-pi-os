@@ -56,6 +56,7 @@ kernel-menuconfig:
 
 kernel-dtb:
 	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 dtbs
+	cp -af $(KERNEL_SRC_DIR)/arch/arm/boot/dts/bcm2710-rpi-3-b.dtb $(PWD)/boot/
 	
 modules:
 #	rm $(KERNEL_MOD_BUILD_DIR) -rf
