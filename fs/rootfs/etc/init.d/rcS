@@ -6,11 +6,18 @@ mkdir -p /dev/pts
 /bin/mount -a
 /bin/hostname -F /etc/hostname
 
+mdev -s
+
 # modules load
 modprobe rfkill
 modprobe cfg80211
 modprobe brcmutil
 modprobe brcmfmac
+modprobe industrialio
+modprobe industrialio-buffer-cb
+modprobe kfifo_buf
+modprobe i2c_bcm2708
+modprobe i2c_dev
 sleep 1
 
 # network config
