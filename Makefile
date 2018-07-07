@@ -15,6 +15,7 @@ ROOTFS_SRC_DIR = $(PWD)/fs/rootfs
 ROOTFS_BUILD_DIR = $(PWD)/build/rootfs
 KERNEL_DTC_TOOL = $(PWD)/kernel/linux-4.9/scripts/dtc/dtc
 KERNEL_DTS_DIR = $(PWD)/kernel/linux-4.9/arch/arm/boot/dts/zynq-ax7010.dts
+KDIR = $(PWD)/build/modules/lib/modules/4.9.80-v7/build
 
 # library
 # openssl library
@@ -57,8 +58,12 @@ kernel-dtb:
 	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 dtbs
 	
 modules:
-	rm $(KERNEL_MOD_BUILD_DIR) -rf
+#	rm $(KERNEL_MOD_BUILD_DIR) -rf
 	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 modules -j4
+#	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 modules_install INSTALL_MOD_PATH=$(KERNEL_MOD_BUILD_DIR)
+
+modules_install:
+	rm $(KERNEL_MOD_BUILD_DIR) -rf
 	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 modules_install INSTALL_MOD_PATH=$(KERNEL_MOD_BUILD_DIR)
 	
 busybox-config:
@@ -94,15 +99,10 @@ rootfs:
 	cp -af $(KERNEL_MOD_BUILD_DIR)/lib/modules/4.9.80-v7/kernel/* $(ROOTFS_BUILD_DIR)/lib/modules/4.9.80-v7
 	cp -af $(LIB_DIR)/output/wpa_supplicant/* $(ROOTFS_BUILD_DIR)/sbin
 	rm -rf $(ROOTFS_BUILD_DIR)/linuxrc
-	
-wireless_tool:
-	make -C $(WIRELESS_TOOL_DIR) CC=$(CROSS_COMPILE)gcc
 
-openssl-config:
-	cd $(LIB_OPENSSL_DIR)
-	sh ./config no-asm shared --prefix=$(LIB_INSTALL_DIR)/openssl
-	cd -
-
+os_drv:
+	$(MAKE) -C KERNEL_DIR=$(KDIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE)
+                                     
 help:
 	@echo  ''
 	@echo  '  ------------ rpi ------------'
