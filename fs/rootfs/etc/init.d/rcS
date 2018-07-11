@@ -20,13 +20,17 @@ modprobe i2c_bcm2708
 modprobe i2c_dev
 sleep 1
 
-# network config
-#wpa_supplicant -i wlan0 -c /etc/wpa_supplicant.conf &
-ifconfig eth0 up
-#ifconfig wlan0 up
-#ifconfig wlan0 192.168.0.189
+######################  network config ############################
+/sbin/ifconfig lo 127.0.0.1 netmask 255.0.0.0
 
+#/sbin/ifconfig eth0 192.168.0.182 netmask 255.255.255.0
+#/sbin/route add default gw 192.168.0.1 eth0
+/sbin/udhcpc -b -i eth0 -s /etc/udhcpc.script
 
+wpa_supplicant -iwlan0 -Dnl80211,wext -c/etc/wpa_supplicant.conf -B
+ifconfig wlan0 up
+#/sbin/ifconfig wlan0 192.168.20.83 netmask 255.255.255.0 
+#/sbin/route add default gw 192.168.20.1 wlan0
 
 # telnet up
 if [ -x /sbin/telnetd ];
