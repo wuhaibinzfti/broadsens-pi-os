@@ -74,7 +74,7 @@
 #define BNO055_GYR_RADIANS            BIT(1)
 #define BNO055_ACC_MPSS               0
 
-#define BNO055_MIN_INTERVAL           1000            /* us */
+#define BNO055_MIN_INTERVAL           500           /* us */
 
 /*
  * Operation modes.  It is important that these are listed in the order
@@ -192,8 +192,8 @@ static const struct regmap_config bno055_regmap_config = {
 	.volatile_table = &bno055_volatile_regs,
 };
 
-/* hr timer */
-static unsigned long interval = 10000; /* unit: us */
+/* hr timer default 1s */
+static unsigned long interval = 1000000; /* unit: us */
 
 unsigned long long diff_tv(struct timespec start, struct timespec end)
 {
@@ -202,10 +202,8 @@ unsigned long long diff_tv(struct timespec start, struct timespec end)
 
 enum hrtimer_restart hrtimer_callback(struct hrtimer *hr_timer)
 {
-    //int64_t timestamp = iio_get_time_ns();
     struct bno055_data *data = container_of(hr_timer, struct bno055_data, timer);
 
-    //printk("hr time: %llu\n", timestamp);
     schedule_work(&data->work);
     hrtimer_forward_now(&data->timer, data->ktime);
     return HRTIMER_RESTART;
@@ -213,12 +211,12 @@ enum hrtimer_restart hrtimer_callback(struct hrtimer *hr_timer)
 
 static void bno055_work(struct work_struct *_work)
 {
+    __u8 *buf;
+    int ret;
     struct bno055_data *data = container_of(_work, struct bno055_data, work);
     struct iio_dev *indio_dev = i2c_get_clientdata(data->client);
-    int64_t timestamp = 0;
-    __u8 *buf;
 
-	buf = kzalloc(indio_dev->scan_bytes, GFP_KERNEL);
+    buf = kzalloc(indio_dev->scan_bytes, GFP_KERNEL);
     if (!buf)
         return;
 
@@ -226,72 +224,68 @@ static void bno055_work(struct work_struct *_work)
         test_bit(BNO055_SCAN_LIA_ACCL_Y, indio_dev->active_scan_mask) &&
         test_bit(BNO055_SCAN_LIA_ACCL_Z, indio_dev->active_scan_mask) &&
         indio_dev->scan_timestamp) {
-        timestamp = iio_get_time_ns(indio_dev);
-        //regmap_bulk_read(data->regmap, BNO055_REG_LIA_ACC_DATA_X_LSB, buf, 6);
-	   i2c_smbus_read_i2c_block_data(data->client, BNO055_REG_LIA_ACC_X_LSB, 6, buf);
-	   printk("time consume : %llu\n", iio_get_time_ns(indio_dev) - timestamp);
-        iio_push_to_buffers_with_timestamp(indio_dev, buf, timestamp);
+        ret = regmap_bulk_read(data->regmap, BNO055_REG_LIA_ACC_X_LSB, buf, 6);
+        if (ret >= 0)
+            iio_push_to_buffers_with_timestamp(indio_dev, buf, iio_get_time_ns(indio_dev));
     }
 
-//done:
     kfree(buf);
 }
 
 static int bno055_read_simple_chan(struct iio_dev *indio_dev,
-				   struct iio_chan_spec const *chan,
-				   int *val, int *val2, long mask)
+                                   struct iio_chan_spec const *chan,
+                                   int *val, int *val2, long mask)
 {
 	struct bno055_data *data = iio_priv(indio_dev);
 	__le16 raw_val;
 	int ret;
 
-	switch (mask) {
-	case IIO_CHAN_INFO_RAW:
-		ret = regmap_bulk_read(data->regmap, chan->address,
-				       &raw_val, 2);
-		if (ret < 0)
-			return ret;
-		*val = (s16)le16_to_cpu(raw_val);
-		*val2 = 0;
-		return IIO_VAL_INT;
-	case IIO_CHAN_INFO_OFFSET:
-		ret = regmap_bulk_read(data->regmap,
-				       chan->address + BNO055_REG_OFFSET_ADDR,
-				       &raw_val, 2);
-		if (ret < 0)
-			return ret;
-		*val = (s16)le16_to_cpu(raw_val);
-		*val2 = 0;
-		return IIO_VAL_INT;
-	case IIO_CHAN_INFO_SCALE:
-		*val = 1;
-		switch (chan->type) {
-		case IIO_ACCEL:
-			/* Table 3-17: 1 m/s^2 = 100 LSB */
-			*val2 = 100;
-			break;
-		case IIO_MAGN:
-			/*
-			 * Table 3-19: 1 uT = 16 LSB.  But we need
-			 * Gauss: 1G = 0.1 uT.
-			 */
-			*val2 = 160;
-			break;
-		case IIO_ANGL_VEL:
-			/* Table 3-22: 1 Rps = 900 LSB */
-			*val2 = 900;
-			break;
-		case IIO_ROT:
-			/* Table 3-28: 1 degree = 16 LSB */
-			*val2 = 16;
-			break;
-		default:
-			return -EINVAL;
-		}
-		return IIO_VAL_FRACTIONAL;
-	default:
-		return -EINVAL;
-	}
+    switch (mask) {
+        case IIO_CHAN_INFO_RAW:
+            ret = regmap_bulk_read(data->regmap, chan->address, &raw_val, 2);
+            if (ret < 0)
+                return ret;
+            *val = (s16)le16_to_cpu(raw_val);
+            *val2 = 0;
+            return IIO_VAL_INT;
+        case IIO_CHAN_INFO_OFFSET:
+            ret = regmap_bulk_read(data->regmap,
+                                   chan->address + BNO055_REG_OFFSET_ADDR,
+                                   &raw_val, 2);
+            if (ret < 0)
+                return ret;
+            *val = (s16)le16_to_cpu(raw_val);
+            *val2 = 0;
+            return IIO_VAL_INT;
+        case IIO_CHAN_INFO_SCALE:
+            *val = 1;
+            switch (chan->type) {
+                case IIO_ACCEL:
+                    /* Table 3-17: 1 m/s^2 = 100 LSB */
+                    *val2 = 100;
+                    break;
+                case IIO_MAGN:
+                    /*
+                     * Table 3-19: 1 uT = 16 LSB. But we need
+                     * Gauss: 1G = 0.1 uT.
+                     */
+                    *val2 = 160;
+                    break;
+                    case IIO_ANGL_VEL:
+                    /* Table 3-22: 1 Rps = 900 LSB */
+                    *val2 = 900;
+			       break;
+                case IIO_ROT:
+                    /* Table 3-28: 1 degree = 16 LSB */
+                    *val2 = 16;
+                    break;
+                default:
+                    return -EINVAL;
+            }
+        return IIO_VAL_FRACTIONAL;
+    default:
+        return -EINVAL;
+    }
 }
 
 static int bno055_read_temp_chan(struct iio_dev *indio_dev, int *val)
@@ -389,32 +383,28 @@ static int bno055_read_raw_multi(struct iio_dev *indio_dev,
 
 static int bno055_init_chip(struct iio_dev *indio_dev)
 {
-	struct bno055_data *data = iio_priv(indio_dev);
-	struct device *dev = regmap_get_device(data->regmap);
-	u8 chip_id_bytes[6];
-	u32 chip_id;
-	u16 sw_rev;
-	int ret;
+    struct bno055_data *data = iio_priv(indio_dev);
+    struct device *dev = regmap_get_device(data->regmap);
+    u8 chip_id_bytes[6];
+    u32 chip_id;
+    u16 sw_rev;
+    int ret;
 
-#if 0
-	ret = device_property_read_u32(dev, "bosch,operation-mode",
-				       &data->op_mode);
-	if (ret < 0) {
-		dev_info(dev, "failed to read operation mode, falling back to accel+gyro\n");
-		data->op_mode = BNO055_MODE_ACC_GYRO;
-	}
-#endif
-     data->op_mode = BNO055_MODE_NDOF;
+    ret = device_property_read_u32(dev, "bosch,operation-mode", &data->op_mode);
+    if (ret < 0) {
+        dev_info(dev, "failed to read operation mode, falling back to MODE_NDOF\n");
+        data->op_mode = BNO055_MODE_NDOF;
+    }
 
-	if (data->op_mode >= BNO055_MODE_MAX) {
-		dev_err(dev, "bad operation mode %d\n", data->op_mode);
-		return -EINVAL;
-	}
+    if (data->op_mode >= BNO055_MODE_MAX) {
+        dev_err(dev, "bad operation mode %d\n", data->op_mode);
+        return -EINVAL;
+    }
 
 	ret = regmap_write(data->regmap, BNO055_REG_PAGE_ID, 0);
 	if (ret < 0) {
-		dev_err(dev, "failed to switch to register page 0\n");
-		//return ret;
+        dev_err(dev, "failed to switch to register page 0\n");
+        //return ret;
 	}
 
 	/*
@@ -469,12 +459,9 @@ static bool bno055_fusion_mode(struct bno055_data *data)
 	return data->op_mode >= BNO055_MODE_IMU;
 }
 
-static void bno055_init_simple_channels(struct iio_chan_spec *p,
-					                    enum iio_chan_type type,
-					                    u8 address,
-					                    const char *extend_name,
-					                    bool has_offset,
-					                    int scan_index)
+static void bno055_init_simple_channels(struct iio_chan_spec *p, enum iio_chan_type type,
+					                  u8 address, const char *extend_name,
+					                  bool has_offset, int scan_index)
 {
     int i;
     int mask = BIT(IIO_CHAN_INFO_RAW);
@@ -682,8 +669,7 @@ static int bno055_ring_postdisable(struct iio_dev *indio_dev)
     return 0;
 }
 
-static const struct iio_buffer_setup_ops bno055_ring_setup_ops =
-{
+static const struct iio_buffer_setup_ops bno055_ring_setup_ops = {
     .preenable = &bno055_ring_preenable,
     .postenable = &bno055_ring_postenable,
     .postdisable = &bno055_ring_postdisable,
@@ -703,117 +689,80 @@ static int bno055_register_ring(struct iio_dev *indio_dev)
     return 0;
 }
 
-struct i2c_client *bno055_client = NULL;
-
-static int bno055_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int bno055_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
-	int ret;
-	struct iio_dev *indio_dev;
-	struct bno055_data *data;
+    int ret;
+    struct iio_dev *indio_dev;
+    struct bno055_data *data;
 
-    bno055_client = client;
+    indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*data));
+    if (!indio_dev)
+        return -ENOMEM;
 
-	indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*data));
-	if (!indio_dev)
-		return -ENOMEM;
+    data = iio_priv(indio_dev);
 
-	data = iio_priv(indio_dev);
+    data->regmap = devm_regmap_init_i2c(client, &bno055_regmap_config);
+    if (IS_ERR(data->regmap))
+        return PTR_ERR(data->regmap);
 
-	data->regmap = devm_regmap_init_i2c(client, &bno055_regmap_config);
-	if (IS_ERR(data->regmap))
-		return PTR_ERR(data->regmap);
+    indio_dev->dev.parent = &client->dev;
+    indio_dev->name = BNO055_DRIVER_NAME;
 
-	indio_dev->dev.parent = &client->dev;
-	indio_dev->name = BNO055_DRIVER_NAME;
-
-	ret = bno055_init_chip(indio_dev);
-	if (ret)
-		return ret;
-
-	ret = bno055_init_channels(indio_dev);
-	if (ret)
-		return ret;
-
-    ret = bno055_register_ring(indio_dev);
+    ret = bno055_init_chip(indio_dev);
     if (ret)
         return ret;
 
-	indio_dev->info = &bno055_info;
-	indio_dev->modes = (INDIO_BUFFER_SOFTWARE | INDIO_DIRECT_MODE);
-	i2c_set_clientdata(client, indio_dev);
+    ret = bno055_init_channels(indio_dev);
+    if (ret)
+        return ret;
+
+    ret = bno055_register_ring(indio_dev);
+    if (ret)
+    return ret;
+
+    indio_dev->info = &bno055_info;
+    indio_dev->modes = INDIO_BUFFER_SOFTWARE | INDIO_DIRECT_MODE;
+    i2c_set_clientdata(client, indio_dev);
     data->client = client;
 
-	ret = devm_iio_device_register(&client->dev, indio_dev);
-	if (ret < 0) {
-		dev_err(&client->dev, "could not register iio device\n");
-		return ret;
-	}
+    ret = devm_iio_device_register(&client->dev, indio_dev);
+    if (ret < 0) {
+        dev_err(&client->dev, "could not register iio device\n");
+        return ret;
+    }
 
-     INIT_WORK(&data->work, bno055_work);
-     hrtimer_init(&data->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-     data->timer.function = hrtimer_callback;
-     data->ktime = ktime_set(interval / 1000000, (interval % 1000000) * 1000);
+    INIT_WORK(&data->work, bno055_work);
+    hrtimer_init(&data->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+    data->timer.function = hrtimer_callback;
+    data->ktime = ktime_set(interval / 1000000, (interval % 1000000) * 1000);
 
-	return 0;
+    return 0;
 }
 
-static const struct i2c_device_id bno055_id[] =
-{
+static const struct of_device_id i2c_of_match[] = {
+    { .compatible = "bosch,bno055" },
+    {}
+};
+MODULE_DEVICE_TABLE(of, i2c_of_match);
+
+static const struct i2c_device_id bno055_id[] = {
 	{"bno055", 0},
-	{ },
+	{},
 };
 MODULE_DEVICE_TABLE(i2c, bno055_id);
 
-static struct i2c_driver bno055_driver =
-{
+static struct i2c_driver bno055_driver = {
 	.driver = {
-		.name	= BNO055_DRIVER_NAME,
+		.name	= "bno055",
+         .of_match_table = i2c_of_match,
+         .owner	= THIS_MODULE,
 	},
 	.probe		= bno055_probe,
 	.id_table	= bno055_id,
 };
 
-static struct i2c_board_info bno055_device[] =
-{
-    { I2C_BOARD_INFO("bno055", 0x29) },
-};
+module_i2c_driver(bno055_driver);
 
-static int __init bno055_init(void)
-{
-    struct i2c_adapter *adap;
-    struct i2c_client *client;
-
-    adap = i2c_get_adapter(1);
-    if (!adap) {
-        printk("i2c adapter %d\n", 1);
-        return -ENODEV;
-    }
-    client = i2c_new_device(adap, bno055_device);
-    if (!client) {
-        printk("get i2c client %s @ 0x%02x fail!\n", bno055_device[0].type,
-                bno055_device[0].addr);
-        return -ENODEV;
-    }
-
-    i2c_put_adapter(adap);
-    i2c_add_driver(&bno055_driver);
-    printk("bno055 init success!\n");
-
-    return 0;
-}
-
-static void __exit bno055_exit(void)
-{
-    i2c_del_driver(&bno055_driver);
-    if (NULL != bno055_client)
-        i2c_unregister_device(bno055_client);
-    printk("bno055 removed\n");
-}
-
-module_init(bno055_init);
-module_exit(bno055_exit);
-
-MODULE_AUTHOR("Vlad Dogaru <vlad.dogaru@xxxxxxxxx>");
+MODULE_AUTHOR("wuhaibin");
 MODULE_DESCRIPTION("Driver for Bosch BNO055 9-axis orientation sensor");
 MODULE_LICENSE("GPL v2");
