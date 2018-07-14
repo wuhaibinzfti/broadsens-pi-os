@@ -1,8 +1,9 @@
-PHONY := openssl wpa_supplicant libnl libxml2
+PHONY := openssl wpa_supplicant libnl libxml2 libiio
 
 PWD := $(shell pwd)
+TOP_DIR := $(shell dirname $(PWD))
 
-TOOLCHAIN_DIR = $(PWD)/../tools/toolchain/arm-bcm2708/arm-linux-gnueabihf/bin
+TOOLCHAIN_DIR = $(TOP_DIR)/tools/toolchain/arm-bcm2708/arm-linux-gnueabihf/bin
 CROSS_COMPILE = $(TOOLCHAIN_DIR)/arm-linux-gnueabihf-
 
 # library
@@ -20,6 +21,7 @@ LIBNL_DIR = $(PWD)/libnl/libnl-3.4.0
 LIB_INSTALL_DIR = $(PWD)/output
 
 LIBXML2_DIR = $(PWD)/libxml2/libxml2-2.9.0
+LIBIIO_DIR = $(PWD)/libiio/libiio-0.15
 
 wireless_tool:
 	make -C $(WIRELESS_TOOL_DIR) CC=$(CROSS_COMPILE)gcc
@@ -68,14 +70,24 @@ openssl-distclean:
 # For libxml2 build
 libxml2-config:
 	cd $(LIBXML2_DIR) && ./configure CC=$(CROSS_COMPILE)gcc --host=arm-linux-gnueabihf --prefix=$(LIB_INSTALL_DIR)/libxml2 --enable-shared --with-python=no
-
 libxml2:
 	make -C $(LIBXML2_DIR)
-
 libxml2-install:
 	rm -rf $(LIB_INSTALL_DIR)/libxml2
 	make -C $(LIBXML2_DIR) install
 
+# For libiio build
+libiio-config:
+	cd $(LIBIIO_DIR) && cmake \
+	-DCMAKE_TOOLCHAIN_FILE=$(PWD)/libiio/toolchainfile.cmake \
+	-DCMAKE_INSTALL_PREFIX=$(LIB_INSTALL_DIR)/libiio \
+	-DCMAKE_EXE_LINKER_FLAGS="-L$(LIB_INSTALL_DIR)/libxml2/lib -lxml2 -lpthread"
+libiio:
+	make -C $(LIBIIO_DIR) all
+libiio-install:
+	rm -rf $(LIB_INSTALL_DIR)/libiio
+	make -C $(LIBIIO_DIR) install
+	
 help:
 	@echo  ''
 	@echo  '  ----------------- lib ----------------'
