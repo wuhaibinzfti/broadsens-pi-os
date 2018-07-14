@@ -306,6 +306,12 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "disabled";
+			
+			imu@29 {
+			    compatible = "bosch,bno055";
+				reg = <0x29>;
+				bosch,operation-mode = <0x0c>;   /* BNO055_MODE_NDOF */
+			};
 		};
 
 		i2c2: i2c@7e805000 {
