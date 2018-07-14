@@ -1,8 +1,9 @@
-PHONY := u-boot u-boot-distclean kernel busybox modules rootfs
+PHONY := u-boot u-boot-distclean kernel busybox modules rootfs image
 
 PWD := $(shell pwd)
 UBOOT_SRC_DIR = $(PWD)/u-boot/u-boot-2017.04
 KERNEL_SRC_DIR = $(PWD)/kernel/linux-rpi-4.9.y-stable
+KERNEL_XENOMAI_SRC_DIR= $(PWD)/kernel/linux-rpi-4.1.y
 BUSYBOX_SRC_DIR = $(PWD)/busybox/busybox-1.27.2
 TOOLS_DIR = $(PWD)/tools
 LIB_DIR = $(PWD)/lib
@@ -16,6 +17,7 @@ ROOTFS_BUILD_DIR = $(PWD)/build/rootfs
 KERNEL_DTC_TOOL = $(PWD)/kernel/linux-4.9/scripts/dtc/dtc
 KERNEL_DTS_DIR = $(PWD)/kernel/linux-4.9/arch/arm/boot/dts/zynq-ax7010.dts
 KDIR = $(PWD)/build/modules/lib/modules/4.9.80-v7/build
+OS_DRV_DIR = $(PWD)/osdrv/bno055
 
 # library
 # openssl library
@@ -42,12 +44,12 @@ uboot-distclean:
 
 kernel-config:
 	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 bcm2709_defconfig
-	
+
 kernel:
 	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 zImage -j4
 	rm -rf $(PWD)/boot/kernel7.img
 	$(KERNEL_SRC_DIR)/scripts/mkknlimg $(KERNEL_SRC_DIR)/arch/arm/boot/zImage $(PWD)/boot/kernel7.img
-	
+
 kernel-distclean:
 	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 distclean
 
@@ -57,16 +59,41 @@ kernel-menuconfig:
 kernel-dtb:
 	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 dtbs
 	cp -af $(KERNEL_SRC_DIR)/arch/arm/boot/dts/bcm2710-rpi-3-b.dtb $(PWD)/boot/
-	
-modules:
-#	rm $(KERNEL_MOD_BUILD_DIR) -rf
-	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 modules -j4
-#	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 modules_install INSTALL_MOD_PATH=$(KERNEL_MOD_BUILD_DIR)
 
-modules_install:
+kernel-modules:
+	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 modules -j4
+
+kernel-modules-install:
 	rm $(KERNEL_MOD_BUILD_DIR) -rf
 	make -C $(KERNEL_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 modules_install INSTALL_MOD_PATH=$(KERNEL_MOD_BUILD_DIR)
 	
+image:
+	cd $(PWD)/scripts && ./image_make
+
+	
+kernel_xenomai-config:
+	make -C $(KERNEL_XENOMAI_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 bcm2709_defconfig
+	
+kernel_xenomai:
+	make -C $(KERNEL_XENOMAI_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 zImage -j4
+	rm -rf $(PWD)/boot/kernel7.img
+	$(KERNEL_XENOMAI_SRC_DIR)/scripts/mkknlimg $(KERNEL_XENOMAI_SRC_DIR)/arch/arm/boot/zImage $(PWD)/boot/kernel7.img
+	
+kernel_xenomai-menuconfig:
+	make -C $(KERNEL_XENOMAI_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 menuconfig
+	
+kernel_xenomai-dtb:
+	make -C $(KERNEL_XENOMAI_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 dtbs
+	cp -af $(KERNEL_XENOMAI_SRC_DIR)/arch/arm/boot/dts/bcm2710-rpi-3-b.dtb $(PWD)/boot/
+	
+xenomai_modules:
+	make -C $(KERNEL_XENOMAI_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 modules -j4
+
+xenomai_modules_install:
+	rm $(KERNEL_MOD_BUILD_DIR) -rf
+	make -C $(KERNEL_XENOMAI_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) KERNEL=kernel7 modules_install INSTALL_MOD_PATH=$(KERNEL_MOD_BUILD_DIR)
+	
+
 busybox-config:
 	make -C $(BUSYBOX_SRC_DIR) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) bcm2709_defconfig
 
@@ -98,6 +125,22 @@ rootfs:
 	cp -af $(LIB_DIR)/output/openssl/lib/*.so* $(ROOTFS_BUILD_DIR)/lib
 	mkdir -p $(ROOTFS_BUILD_DIR)/lib/modules/4.9.80-v7
 	cp -af $(KERNEL_MOD_BUILD_DIR)/lib/modules/4.9.80-v7/kernel/* $(ROOTFS_BUILD_DIR)/lib/modules/4.9.80-v7
+	cp -af $(LIB_DIR)/output/wpa_supplicant/* $(ROOTFS_BUILD_DIR)/sbin
+	rm -rf $(ROOTFS_BUILD_DIR)/linuxrc
+
+rootfs_xenomai:
+	rm -rf $(ROOTFS_BUILD_DIR)
+	make -C $(BUSYBOX_SRC_DIR) install ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) CONFIG_PREFIX=$(ROOTFS_BUILD_DIR)
+	mkdir -p $(ROOTFS_BUILD_DIR)/home/pi $(ROOTFS_BUILD_DIR)/root $(ROOTFS_BUILD_DIR)/mnt $(ROOTFS_BUILD_DIR)/var/run/wpa_supplicant \
+                 $(ROOTFS_BUILD_DIR)/dev $(ROOTFS_BUILD_DIR)/proc $(ROOTFS_BUILD_DIR)/sys $(ROOTFS_BUILD_DIR)/root $(ROOTFS_BUILD_DIR)/tmp
+	cp -af $(ROOTFS_SRC_DIR)/etc $(ROOTFS_BUILD_DIR)
+	cp -af $(LIB_DIR)/libtoolchain/* $(ROOTFS_BUILD_DIR)/lib
+	cp -af $(LIB_DIR)/firmware $(ROOTFS_BUILD_DIR)/lib/
+	cp -af $(LIB_DIR)/output/libnl/lib/libnl-3.so* $(ROOTFS_BUILD_DIR)/lib
+	cp -af $(LIB_DIR)/output/libnl/lib/libnl-genl-3.so* $(ROOTFS_BUILD_DIR)/lib
+	cp -af $(LIB_DIR)/output/openssl/lib/*.so* $(ROOTFS_BUILD_DIR)/lib
+	mkdir -p $(ROOTFS_BUILD_DIR)/lib/modules/4.1.21-v7+
+	cp -af $(KERNEL_MOD_BUILD_DIR)/lib/modules/4.1.21-v7+/kernel/* $(ROOTFS_BUILD_DIR)/lib/modules/4.1.21-v7+
 	cp -af $(LIB_DIR)/output/wpa_supplicant/* $(ROOTFS_BUILD_DIR)/sbin
 	rm -rf $(ROOTFS_BUILD_DIR)/linuxrc
 
