@@ -215,6 +215,7 @@ static void bno055_work(struct work_struct *_work)
     int ret;
     struct bno055_data *data = container_of(_work, struct bno055_data, work);
     struct iio_dev *indio_dev = i2c_get_clientdata(data->client);
+	int64_t timestamp = 0;
 
     buf = kzalloc(indio_dev->scan_bytes, GFP_KERNEL);
     if (!buf)
@@ -224,7 +225,9 @@ static void bno055_work(struct work_struct *_work)
         test_bit(BNO055_SCAN_LIA_ACCL_Y, indio_dev->active_scan_mask) &&
         test_bit(BNO055_SCAN_LIA_ACCL_Z, indio_dev->active_scan_mask) &&
         indio_dev->scan_timestamp) {
+		timestamp = iio_get_time_ns(indio_dev);
         ret = regmap_bulk_read(data->regmap, BNO055_REG_LIA_ACC_X_LSB, buf, 6);
+		printk("time : %lld\n", iio_get_time_ns(indio_dev) - timestamp);
         if (ret >= 0)
             iio_push_to_buffers_with_timestamp(indio_dev, buf, iio_get_time_ns(indio_dev));
     }
