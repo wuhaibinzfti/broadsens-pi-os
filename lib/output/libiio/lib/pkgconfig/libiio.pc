@@ -1,0 +1,12 @@
+prefix=/home/wuhaibin/broadsens/20180707_pi-os/broadsens-pi-os/lib/output/libiio
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: libiio
+Description: Library for interfacing IIO devices
+Version: 0.15
+
+Requires:
+Libs: -L${libdir} -liio
+Cflags: -I${includedir}
