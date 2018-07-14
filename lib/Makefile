@@ -1,4 +1,4 @@
-PHONY := openssl wpa_supplicant libnl
+PHONY := openssl wpa_supplicant libnl libxml2
 
 PWD := $(shell pwd)
 
@@ -19,6 +19,7 @@ LIBNL_DIR = $(PWD)/libnl/libnl-3.4.0
 # library install
 LIB_INSTALL_DIR = $(PWD)/output
 
+LIBXML2_DIR = $(PWD)/libxml2/libxml2-2.9.0
 
 wireless_tool:
 	make -C $(WIRELESS_TOOL_DIR) CC=$(CROSS_COMPILE)gcc
@@ -63,6 +64,17 @@ openssl-clean:
 	make -C $(LIB_OPENSSL_DIR) clean
 openssl-distclean:
 	make -C $(LIB_OPENSSL_DIR) distclean
+
+# For libxml2 build
+libxml2-config:
+	cd $(LIBXML2_DIR) && ./configure CC=$(CROSS_COMPILE)gcc --host=arm-linux-gnueabihf --prefix=$(LIB_INSTALL_DIR)/libxml2 --enable-shared --with-python=no
+
+libxml2:
+	make -C $(LIBXML2_DIR)
+
+libxml2-install:
+	rm -rf $(LIB_INSTALL_DIR)/libxml2
+	make -C $(LIBXML2_DIR) install
 
 help:
 	@echo  ''
