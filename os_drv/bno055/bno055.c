@@ -105,9 +105,9 @@ enum bno055_operation_mode {
 
 enum bno055_scan
 {
-    BNO055_SCAN_LIA_ACCL_X,
-    BNO055_SCAN_LIA_ACCL_Y,
-    BNO055_SCAN_LIA_ACCL_Z,
+    BNO055_SCAN_ACCEL_X,
+    BNO055_SCAN_ACCEL_Y,
+    BNO055_SCAN_ACCEL_Z,
     BNO055_SCAN_TIMESTAMP,
 };
 
@@ -128,7 +128,7 @@ static const int bno055_num_channels[] = {
 	 * (meaning a single channel) and as Euler angles (3 separate
 	 * channels).
 	 */
-	15, 15, 15, 18, 18,
+	12, 12, 12, 15, 15,
 };
 
 struct bno055_data {
@@ -211,27 +211,51 @@ enum hrtimer_restart hrtimer_callback(struct hrtimer *hr_timer)
 
 static void bno055_work(struct work_struct *_work)
 {
-    __u8 *buf;
+    u8 *buf, *ptr;
     int ret;
     struct bno055_data *data = container_of(_work, struct bno055_data, work);
     struct iio_dev *indio_dev = i2c_get_clientdata(data->client);
-	int64_t timestamp = 0;
 
-    buf = kzalloc(indio_dev->scan_bytes, GFP_KERNEL);
+    buf = (u8 *)kzalloc(indio_dev->scan_bytes, GFP_KERNEL);
     if (!buf)
         return;
 
-    if (test_bit(BNO055_SCAN_LIA_ACCL_X, indio_dev->active_scan_mask) &&
-        test_bit(BNO055_SCAN_LIA_ACCL_Y, indio_dev->active_scan_mask) &&
-        test_bit(BNO055_SCAN_LIA_ACCL_Z, indio_dev->active_scan_mask) &&
-        indio_dev->scan_timestamp) {
-		timestamp = iio_get_time_ns(indio_dev);
+    if (test_bit(BNO055_SCAN_ACCEL_X, indio_dev->active_scan_mask) &&
+        test_bit(BNO055_SCAN_ACCEL_Y, indio_dev->active_scan_mask) &&
+        test_bit(BNO055_SCAN_ACCEL_Z, indio_dev->active_scan_mask)) {
         ret = regmap_bulk_read(data->regmap, BNO055_REG_LIA_ACC_X_LSB, buf, 6);
-		printk("time : %lld\n", iio_get_time_ns(indio_dev) - timestamp);
-        if (ret >= 0)
-            iio_push_to_buffers_with_timestamp(indio_dev, buf, iio_get_time_ns(indio_dev));
+        if (ret < 0)
+            goto _out;
+    } else {
+        ptr = buf;
+        if (test_bit(BNO055_SCAN_ACCEL_X, indio_dev->active_scan_mask)) {
+            ret = regmap_bulk_read(data->regmap, BNO055_REG_LIA_ACC_X_LSB, ptr, 2);
+            if (ret < 0)
+                goto _out;
+            ptr += 2;
+        }
+
+        if (test_bit(BNO055_SCAN_ACCEL_Y, indio_dev->active_scan_mask)) {
+            ret = regmap_bulk_read(data->regmap, BNO055_REG_LIA_ACC_X_LSB + 1, ptr, 2);
+            if (ret < 0)
+                goto _out;
+            ptr += 2;
+        }
+
+        if (test_bit(BNO055_SCAN_ACCEL_Z, indio_dev->active_scan_mask))
+            ret = regmap_bulk_read(data->regmap, BNO055_REG_LIA_ACC_X_LSB + 2, ptr, 2);
+            if (ret < 0)
+                goto _out;
+            ptr += 2;
     }
 
+    if (indio_dev->scan_timestamp) {
+        iio_push_to_buffers_with_timestamp(indio_dev, buf, iio_get_time_ns(indio_dev));
+    } else {
+        iio_push_to_buffers(indio_dev, buf);
+    }
+
+_out:
     kfree(buf);
 }
 
@@ -320,27 +344,27 @@ static int bno055_read_quaternion(struct iio_dev *indio_dev,
 	int i, ret;
 
 	switch (mask) {
-	case IIO_CHAN_INFO_RAW:
-		if (size < 4)
-			return -EINVAL;
-		ret = regmap_bulk_read(data->regmap,
-				       BNO055_REG_QUA_W_LSB,
-				       raw_vals, sizeof(raw_vals));
-		if (ret < 0)
-			return ret;
-		for (i = 0; i < 4; i++)
-			vals[i] = (s16)le16_to_cpu(raw_vals[i]);
-		*val_len = 4;
-		return IIO_VAL_INT_MULTIPLE;
-	case IIO_CHAN_INFO_SCALE:
-		/* Table 3-31: 1 quaternion = 2^14 LSB */
-		if (size < 2)
-			return -EINVAL;
-		vals[0] = 1;
-		vals[1] = 1 << 14;
-		return IIO_VAL_FRACTIONAL;
-	default:
-		return -EINVAL;
+    	case IIO_CHAN_INFO_RAW:
+    		if (size < 4)
+    			return -EINVAL;
+    		ret = regmap_bulk_read(data->regmap,
+    				       BNO055_REG_QUA_W_LSB,
+    				       raw_vals, sizeof(raw_vals));
+    		if (ret < 0)
+    			return ret;
+    		for (i = 0; i < 4; i++)
+    			vals[i] = (s16)le16_to_cpu(raw_vals[i]);
+    		*val_len = 4;
+    		return IIO_VAL_INT_MULTIPLE;
+    	case IIO_CHAN_INFO_SCALE:
+    		/* Table 3-31: 1 quaternion = 2^14 LSB */
+    		if (size < 2)
+    			return -EINVAL;
+    		vals[0] = 1;
+    		vals[1] = 1 << 14;
+    		return IIO_VAL_FRACTIONAL;
+    	default:
+    		return -EINVAL;
 	}
 }
 
@@ -463,8 +487,7 @@ static bool bno055_fusion_mode(struct bno055_data *data)
 }
 
 static void bno055_init_simple_channels(struct iio_chan_spec *p, enum iio_chan_type type,
-					                  u8 address, const char *extend_name,
-					                  bool has_offset, int scan_index)
+					                  u8 address, bool has_offset, int scan_index)
 {
     int i;
     int mask = BIT(IIO_CHAN_INFO_RAW);
@@ -487,14 +510,13 @@ static void bno055_init_simple_channels(struct iio_chan_spec *p, enum iio_chan_t
             .channel2 = IIO_MOD_X + i,
             /* Each value is stored in two registers. */
             .address = address + 2 * i,
-            .extend_name = extend_name,
             .scan_index = scan_index,
             .scan_type = {
                 .sign = 's',
                 .realbits = 16,
                 .storagebits = 16,
                 .shift = 0,
-                .endianness = IIO_BE,
+                .endianness = IIO_CPU,
             }
         };
         if (scan_index >= 0)
@@ -519,11 +541,9 @@ static int bno055_init_channels(struct iio_dev *indio_dev)
 	if (data->op_mode == BNO055_MODE_ACC_ONLY ||
 	    data->op_mode == BNO055_MODE_ACC_MAG ||
 	    data->op_mode == BNO055_MODE_ACC_GYRO ||
-	    data->op_mode == BNO055_MODE_AMG ||
-	    /* All fusion modes use the accelerometer. */
-	    data->op_mode >= BNO055_MODE_IMU) {
+	    data->op_mode == BNO055_MODE_AMG) {
 		bno055_init_simple_channels(p, IIO_ACCEL, BNO055_REG_ACC_X_LSB,
-					               NULL, has_offset, -1);
+					               has_offset, -1);
 		p += 3;
 	}
 
@@ -533,7 +553,7 @@ static int bno055_init_channels(struct iio_dev *indio_dev)
 	    data->op_mode == BNO055_MODE_AMG ||
 	    data->op_mode >= BNO055_MODE_COMPASS) {
 		bno055_init_simple_channels(p, IIO_MAGN, BNO055_REG_MAG_X_LSB,
-					               NULL, has_offset, -1);
+					               has_offset, -1);
 		p += 3;
 	}
 
@@ -545,20 +565,20 @@ static int bno055_init_channels(struct iio_dev *indio_dev)
 	    data->op_mode == BNO055_MODE_NDOF_FMC_OFF ||
 	    data->op_mode == BNO055_MODE_NDOF) {
 		bno055_init_simple_channels(p, IIO_ANGL_VEL, BNO055_REG_GYR_X_LSB,
-					               NULL, has_offset, -1);
+					               has_offset, -1);
 		p += 3;
 	}
 
 	if (bno055_fusion_mode(data)) {
 		/* Euler angles. */
 		bno055_init_simple_channels(p, IIO_ROT, BNO055_REG_EUL_HEADING_LSB,
-					               NULL, false, -1);
+					               false, -1);
 		p += 3;
 
-         /* Add linear accel channel with scan */
+         /* fusion mode use linear accel */
 		bno055_init_simple_channels(p, IIO_ACCEL, BNO055_REG_LIA_ACC_X_LSB,
-					               "linear", false, BNO055_SCAN_LIA_ACCL_X);
-		p += 3;
+					               has_offset, BNO055_SCAN_ACCEL_X);
+         p += 3;
 
 		/* Add quaternion orientation channel. */
 		*p = (struct iio_chan_spec) {
