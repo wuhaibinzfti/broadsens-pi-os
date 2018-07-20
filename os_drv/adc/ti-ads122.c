@@ -101,9 +101,9 @@
 #define ADS122_CFG_GAIN_MASK   BIT(s0)
 
 
-#define ADS122_CFG_PGA_SHIFT	0
+#define ADS122_CFG_PGA_SHIFT   0
 #define ADS122_CFG_GAIN_SHIFT  1
-#define ADS122_CFG_MUX_SHIFT	4
+#define ADS122_CFG_MUX_SHIFT   4
 
 /* register 1 */
 #define ADS122_CFG_TS_BIT_MASK  BIT(0)
@@ -115,10 +115,18 @@
 #define ADS1015_DEFAULT_CHAN		0
 
 #define ADS122_DEFAULT_OP_MODE      0
-#define ADS122_DEFAULT_GAIN         7
+#define ADS122_DEFAULT_GAIN         0
 #define ADS122_DEFAULT_PGA          0
 #define ADS122_DEFAULT_DATA_RATE    1
 #define ADS122_DEFAULT_CHAN		 0
+
+#define _DEBUG
+#ifdef _DEBUG
+#define pr_debug(format,...)   \
+        printk("line:%d: "format"", __LINE__, ##__VA_ARGS__)
+#else
+#define pr_debug(format,...)
+#endif
 
 enum chip_ids {
 	ADS122_0,
@@ -206,7 +214,7 @@ static const unsigned int ads1115_data_rate[] = {
 };
 
 /* unit:SPS */
-static const unsigned int ads122_data_rate[][7] = {
+static const unsigned int ads122_dr_tbl[][7] = {
     {20, 45, 90,  175, 330, 660,  1000},    /* normal rate */
     {40, 90, 180, 350, 660, 1200, 2000}     /* turbo mode */
 };
@@ -220,15 +228,22 @@ static int ads1015_fullscale_range[] = {
 	6144, 4096, 2048, 1024, 512, 256, 256, 256
 };
 
+/*
+ * Translation from PGA bits to full-scale positive and negative input voltage
+ * range in mV, unit:mv
+ */
 static int32_t ads122_fullscale_range[] = {
-    2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144
+    2048, 1024, 512, 256, 128, 64, 32, 16
 };
+
+#define ADS122_MIN_INTERVAL 1000
+static unsigned long interval = 1000000; /* unit: us */
 
 /*
  * Translation from COMP_QUE field value to the number of successive readings
  * exceed the threshold values before an interrupt is generated
  */
-static const int ads1015_comp_queue[] = { 1, 2, 4 };
+static const int ads1015_comp_queue[] = {1, 2, 4};
 
 static const struct iio_event_spec ads1015_events[] = {
 	{
@@ -259,7 +274,7 @@ static const struct iio_event_spec ads1015_events[] = {
 	.scan_index = _addr,					\
 	.scan_type = {						\
 		.sign = 's',					\
-		.realbits = 12,					\
+		.realbits = 16,					\
 		.storagebits = 16,				\
 		.shift = 4,					\
 		.endianness = IIO_CPU,				\
@@ -334,58 +349,60 @@ static const struct iio_event_spec ads1015_events[] = {
 	.datasheet_name = "AIN"#_chan"-AIN"#_chan2,		\
 }
 
-#define ADS122_V_CHAN(_chan, _addr) {		\
-    .type = IIO_VOLTAGE,					\
-    .differential = 1,					     \
-    .indexed = 1,						     \
-    .address = _addr,					     \
-    .channel = _chan,					     \
-    .info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |     \
-                          BIT(IIO_CHAN_INFO_SCALE) |   \
-                          BIT(IIO_CHAN_INFO_SAMP_FREQ),\
-    .scan_index = _addr,                               \
-    .scan_type = {                                     \
-        .sign = 's',                                       \
-        .realbits = 24,                                    \
-        .storagebits = 32,                                 \
-        .endianness = IIO_CPU,	                             \
-    },                                                  \
-    .event_spec = ads1015_events,                       \
-    .num_event_specs = ARRAY_SIZE(ads1015_events),      \
-    .datasheet_name = "AIN"#_chan,				\
-}
-
-#define ADS122_V_DIFF_CHAN(_chan, _chan2, _addr) {  \
-    .type = IIO_VOLTAGE,					       \
-    .differential = 1,					     \
-    .indexed = 1,						     \
-    .address = _addr,					     \
-    .channel = _chan,					     \
-    .channel2 = _chan2,                       \
-    .info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |     \
-                          BIT(IIO_CHAN_INFO_SCALE) |   \
-                          BIT(IIO_CHAN_INFO_SAMP_FREQ),\
-    .scan_index = _addr,                               \
-    .scan_type = {                                     \
-        .sign = 's',                                   \
-        .realbits = 24,                                \
-        .storagebits = 32,                             \
-        .shift = 4,                                    \
+#define ADS122_V_CHAN(_chan, _addr) {                   \
+    .type = IIO_VOLTAGE,                                \
+    .indexed = 1,						                \
+    .address = _addr,					                \
+    .channel = _chan,					                \
+    .info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |      \
+                          BIT(IIO_CHAN_INFO_SCALE) |    \
+                          BIT(IIO_CHAN_INFO_SAMP_FREQ), \
+    .scan_index = _addr,                                \
+    .scan_type = {                                      \
+        .sign = 's',                                    \
+        .realbits = 24,                                 \
+        .storagebits = 32,                              \
         .endianness = IIO_CPU,	                         \
     },                                                  \
     .event_spec = ads1015_events,                       \
     .num_event_specs = ARRAY_SIZE(ads1015_events),      \
-    .datasheet_name = "PAIN"#_chan"-NAIN"#_chan2,	  \
+    .datasheet_name = "AIN"#_chan,				       \
 }
 
-#define ADS122_TEMP_CHAN(_si) {  \
-    .type = IIO_TEMP,					       \
-    .channel = -1,					     \
-    .scan_index = _si,                               \
-    .scan_type = {                                     \
-        .sign = 's',                                   \
-        .realbits = 16,                                \
-        .storagebits = 16,                             \
+#define ADS122_V_DIFF_CHAN(_chan, _chan2, _addr) {      \
+    .type = IIO_VOLTAGE,                                \
+    .differential = 1,	                                  \
+    .indexed = 1,                                       \
+    .address = _addr,                                   \
+    .channel = _chan,                                   \
+    .channel2 = _chan2,                                 \
+    .info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |      \
+                          BIT(IIO_CHAN_INFO_SCALE) |    \
+                          BIT(IIO_CHAN_INFO_SAMP_FREQ), \
+    .scan_index = _addr,                                \
+    .scan_type = {                                      \
+        .sign = 's',                                    \
+        .realbits = 24,                                 \
+        .storagebits = 32,                              \
+        .endianness = IIO_CPU,	                         \
+    },                                                  \
+    .event_spec = ads1015_events,                       \
+    .num_event_specs = ARRAY_SIZE(ads1015_events),      \
+    .datasheet_name = "PAIN"#_chan"-NAIN"#_chan2,	   \
+}
+
+#define ADS122_TEMP_CHAN(_addr) {                       \
+    .type = IIO_TEMP,					                \
+    .indexed = 1,                                       \
+    .channel = 0,                                       \
+    .address = _addr,                                   \
+    .info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |      \
+                          BIT(IIO_CHAN_INFO_SCALE),     \
+    .scan_index = _addr,                                \
+    .scan_type = {                                      \
+        .sign = 's',                                    \
+        .realbits = 14,                                 \
+        .storagebits = 16,                              \
     },                                                  \
 }
 
@@ -395,39 +412,39 @@ struct ads1015_thresh_data {
 	int low_thresh;
 };
 
-struct ads1015_data {
+struct ads122_data {
     struct i2c_client *client;
-	struct regmap *regmap;
-	/*
-	 * Protects ADC ops, e.g: concurrent sysfs/buffered
-	 * data reads, configuration updates
-	 */
-	struct mutex lock;
-	struct ads1015_channel_data channel_data[ADS122_CHANNELS];
+    struct regmap *regmap;
+    /*
+    * Protects ADC ops, e.g: concurrent sysfs/buffered
+    * data reads, configuration updates
+    */
+    struct mutex lock;
+    struct ads122_channel_data channel_data[ADS122_CHANNELS];
 
-	unsigned int event_channel;
-	unsigned int comp_mode;
-	struct ads1015_thresh_data thresh_data[ADS122_CHANNELS];
+    unsigned int event_channel;
+    unsigned int comp_mode;
+    struct ads1015_thresh_data thresh_data[ADS122_CHANNELS];
 
-	unsigned int (*data_rate)[7];
-	/*
-	 * Set to true when the ADC is switched to the continuous-conversion
-	 * mode and exits from a power-down state.  This flag is used to avoid
-	 * getting the stale result from the conversion register.
-	 */
-	bool conv_invalid;
+    const unsigned int (*dr_tbl)[7];
+    /*
+    * Set to true when the ADC is switched to the continuous-conversion
+    * mode and exits from a power-down state.  This flag is used to avoid
+    * getting the stale result from the conversion register.
+    */
+    bool conv_invalid;
 
-     struct work_struct work;
-     struct hrtimer timer;
-     ktime_t ktime;
+    struct work_struct work;
+    struct hrtimer timer;
+    ktime_t ktime;
 };
 
-static bool ads1015_event_channel_enabled(struct ads1015_data *data)
+static bool ads1015_event_channel_enabled(struct ads122_data *data)
 {
 	return (data->event_channel != ADS122_CHANNELS);
 }
 
-static void ads1015_event_channel_enable(struct ads1015_data *data, int chan,
+static void ads1015_event_channel_enable(struct ads122_data *data, int chan,
 					 int comp_mode)
 {
 	WARN_ON(ads1015_event_channel_enabled(data));
@@ -436,7 +453,7 @@ static void ads1015_event_channel_enable(struct ads1015_data *data, int chan,
 	data->comp_mode = comp_mode;
 }
 
-static void ads1015_event_channel_disable(struct ads1015_data *data, int chan)
+static void ads1015_event_channel_disable(struct ads122_data *data, int chan)
 {
 	data->event_channel = ADS122_CHANNELS;
 }
@@ -468,7 +485,6 @@ static const struct regmap_config ads1015_regmap_config = {
 static const struct regmap_config ads122_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
-	.max_register = ADS122_REG_3 + ADS122_CMD_WREG,
 	.writeable_reg = ads122_is_writeable_reg,
 };
 
@@ -497,14 +513,29 @@ static const struct iio_chan_spec ads1115_channels[] = {
 };
 
 static const struct iio_chan_spec ads122_chnnels[] = {
+    ADS122_V_DIFF_CHAN(0, 1, ADS122_PAIN0_NAIN1),
+    ADS122_V_DIFF_CHAN(0, 2, ADS122_PAIN0_NAIN2),
+    ADS122_V_DIFF_CHAN(0, 3, ADS122_PAIN0_NAIN3),
     ADS122_V_DIFF_CHAN(1, 0, ADS122_PAIN1_NAIN0),
+    ADS122_V_DIFF_CHAN(1, 2, ADS122_PAIN1_NAIN2),
+    ADS122_V_DIFF_CHAN(1, 3, ADS122_PAIN1_NAIN3),
+    ADS122_V_DIFF_CHAN(2, 3, ADS122_PAIN2_NAIN3),
     ADS122_V_DIFF_CHAN(3, 2, ADS122_PAIN3_NAIN2),
+    ADS122_V_CHAN(0, ADS122_PAIN0_NAVSS),
+    ADS122_V_CHAN(1, ADS122_PAIN1_NAVSS),
+    ADS122_V_CHAN(2, ADS122_PAIN2_NAVSS),
+    ADS122_V_CHAN(3, ADS122_PAIN3_NAVSS),
+    ADS122_V_CHAN(4, ADS122_PREF_NREF_4),
+    ADS122_V_CHAN(5, ADS122_AVDD_AVSS_4),
+    ADS122_V_CHAN(6, ADS122_AINP_AVDDVSS),
+    ADS122_V_CHAN(7, ADS122_PREF_NREF),
     ADS122_TEMP_CHAN(ADS122_TEMP),
     IIO_CHAN_SOFT_TIMESTAMP(ADS122_TIMESTAMP),
 };
 
-static void ads122_write_cmd(struct i2c_client *client, unsigned char cmd)
+static int ads122_write_cmd(struct i2c_client *client, unsigned char cmd)
 {
+    int ret;
     struct i2c_msg msg = {
             .addr = client->addr,
             .flags= 0,
@@ -512,11 +543,15 @@ static void ads122_write_cmd(struct i2c_client *client, unsigned char cmd)
             .buf = &cmd,
     };
 
-    i2c_transfer(client->adapter, &msg, 1);
-    return;
+    ret = i2c_transfer(client->adapter, &msg, 1);
+    if (ret < 0) {
+        printk("i2c transfer error!\n");
+    }
+
+    return ret;
 }
 
-static int ads1015_set_power_state(struct ads1015_data *data, bool on)
+static int ads1015_set_power_state(struct ads122_data *data, bool on)
 {
 	int ret;
 	struct device *dev = regmap_get_device(data->regmap);
@@ -533,78 +568,78 @@ static int ads1015_set_power_state(struct ads1015_data *data, bool on)
 	return ret < 0 ? ret : 0;
 }
 
-static int ads1015_get_adc_result(struct ads1015_data *data, int chan, int32_t *val)
+static int ads122_get_adc_result(struct ads122_data *data, int chan, int32_t *val)
 {
-    int ret, pga, gain, dr, op_mode, dr_old, conv_time, dcnt;
-    unsigned int old, cfg;
-    __u8 buf[6] = {0};
-    int32_t tmp;
+    __u8 buf[6];
+    int ret, dr, mode, conv_time, old, cfg;
 
-    if (chan < 0 || chan >= ADS122_CHANNELS)
+    if (chan < 0 || chan >= ADS122_CHANNELS) {
         return -EINVAL;
+    }
+    pr_debug("ads122 read chn [%d]\n", chan);
 
-    /* register 0: mux[7:4] gain[3:1] pga[0] */
+    /* register0: mux[7:4] gain[3:1] pga[0] */
     ret = regmap_read(data->regmap, ADS122_CMD_RREG + ADS122_REG_0, &old);
-    if (ret)
-        return ret;
+    if (ret) {
+        return -EIO;
+    }
 
-    pga = data->channel_data[chan].pga;
-    gain = data->channel_data[chan].gain;
-    cfg = chan << ADS122_CFG_MUX_SHIFT | gain << ADS122_CFG_GAIN_SHIFT |
-          pga << ADS122_CFG_PGA_SHIFT;
+    pr_debug("ads122 reg0 old[%d]\n", old);
+
+    cfg = chan << ADS122_CFG_MUX_SHIFT |
+          data->channel_data[chan].gain << ADS122_CFG_GAIN_SHIFT |
+          data->channel_data[chan].pga << ADS122_CFG_PGA_SHIFT;
+
+    pr_debug("ads122 reg0 cfg[%d]\n", cfg);
 
     if (old != cfg) {
         ret = regmap_write(data->regmap, ADS122_CMD_WREG + ADS122_REG_0, cfg);
-        if (ret)
-            return ret;
-
+        if (ret) {
+            return -EIO;
+        }
         data->conv_invalid = true;
     }
 
-    if (dr_old > 6 || dr > 6) {
-        return -1;
-    }
-
-    /* register 1: */
-    dr = data->channel_data[chan].data_rate;
+    /* register1: dr[7:5] mode[4] cm[3] vref[2:1] ts[0] */
+    dr = data->channel_data[chan].dr;
 
     /* start conver */
     ads122_write_cmd(data->client, ADS122_CMD_START);
 
-    op_mode = data->channel_data[chan].op_mode;
+    mode = data->channel_data[chan].mode;
     if (data->conv_invalid) {
-        conv_time = DIV_ROUND_UP(USEC_PER_SEC, data->data_rate[op_mode][dr]);
-        conv_time += conv_time / 10;              /* 10% internal clock inaccuracy */
+        conv_time = DIV_ROUND_UP(USEC_PER_SEC, data->dr_tbl[mode][dr]);
+        conv_time += conv_time / 10;  /* 10% internal clock inaccuracy */
         usleep_range(conv_time, conv_time + 1);
     }
 
-    /* Get adc conver value */
-    dcnt = data->channel_data[chan].dcnt;
-    ret = regmap_read(data->regmap, ADS122_CMD_RREG + ADS122_REG_2, buf);
+    /* get adc conver value */
+    ret = regmap_read(data->regmap, ADS122_CMD_RREG + ADS122_REG_2, &old);
     if (ret) {
-        return ret;
+        return -EIO;
     }
 
-    if (test_bit(7, buf)) {
-        ret = regmap_bulk_read(data->regmap, ADS122_CMD_RDATA, buf, dcnt ? 4 : 3);
-        if (ret)
-            return ret;
-        tmp = dcnt ? (buf[1] << 16 | buf[2] << 8 | buf[3]) :
-                     (buf[0] << 16 | buf[1] << 8 | buf[2]);
-
-        *val = sign_extend32(tmp, 23);
+    if (old & 0x80) {
+        ret = regmap_bulk_read(data->regmap, ADS122_CMD_RDATA,
+                               data->channel_data[chan].dcnt ? buf : buf + 1,
+                               data->channel_data[chan].dcnt ? 4 : 3);
+        if (ret) {
+            return -EIO;
+        }
+        *val = buf[1] << 16 | buf[2] << 8 | buf[3];
+        //*val = sign_extend32(*val, 23);
+        pr_debug("adc val:%d\n", *val);
+        return 0;
     }
     else {
-        printk("conversion not finish\n");
-        return -1;
+        printk("conversion not finish, try again\n");
+        return -EAGAIN;
     }
-
-    return 0;
 }
 
-static int ads122_get_temper_result(struct ads1015_data *data, int16_t *val)
+static int ads122_get_temper_result(struct ads122_data *data, int16_t *val)
 {
-    int ret, pga, gain, dr, op_mode, dr_old, conv_time, dcnt;
+    int ret, dr, mode, conv_time, dcnt;
     unsigned int cfg;
     uint8_t buf[6] = {0};
     uint16_t tmp;
@@ -616,33 +651,35 @@ static int ads122_get_temper_result(struct ads1015_data *data, int16_t *val)
         goto out;
 
     /* register 1: */
-    dr = data->channel_data[0].data_rate;
+    dr = data->channel_data[0].dr;
 
     /* start conver */
     ads122_write_cmd(data->client, ADS122_CMD_START);
 
-    op_mode = data->channel_data[0].op_mode;
+    mode = data->channel_data[0].mode;
     if (data->conv_invalid) {
-        conv_time = DIV_ROUND_UP(USEC_PER_SEC, data->data_rate[op_mode][dr]);
+        conv_time = DIV_ROUND_UP(USEC_PER_SEC, data->dr_tbl[mode][dr]);
         conv_time += conv_time / 10;              /* 10% internal clock inaccuracy */
         usleep_range(conv_time, conv_time + 1);
     }
 
     /* Get adc conver value */
-    dcnt = data->channel_data[0].dcnt;
-    ret = regmap_read(data->regmap, ADS122_CMD_RREG + ADS122_REG_2, buf);
+    ret = regmap_bulk_read(data->regmap, ADS122_CMD_RREG + ADS122_REG_2, buf, 1);
     if (ret) {
         goto out;
     }
 
-    if (test_bit(7, buf)) {
-        ret = regmap_bulk_read(data->regmap, ADS122_CMD_RDATA, buf, dcnt ? 4 : 3);
+    if (buf[0] & 0x80) {
+        ret = regmap_bulk_read(data->regmap, ADS122_CMD_RDATA,
+                               data->channel_data[0].dcnt ? buf : buf + 1,
+                               data->channel_data[0].dcnt ? 4 : 3);
         if (ret)
             goto out;
-        tmp = dcnt ? (buf[1] << 8 | buf[2]) : (buf[0] << 8 | buf[1]);
-        tmp = (tmp >> 2) & 0x1FFF;
+        tmp = buf[1] << 8 | buf[2];
+        tmp = (tmp >> 2) & 0x3FFF;
 
-        *val = (int16_t)(tmp << 3) >> 3;
+        *val = ((int16_t)(tmp << 2)) >> 2;
+        *val = tmp;
     }
     else {
         printk("temper conversion not finish\n");
@@ -659,36 +696,75 @@ out:
     return ret;
 }
 
-int32_t temper;
 static void ads122_work(struct work_struct *_work)
 {
     int ret;
-    struct ads1015_data *data = container_of(_work, struct ads1015_data, work);
-    struct iio_dev *indio_dev = i2c_get_clientdata(data->client);
-    __u8 buf[3];
+    __u8 *buf;
     int32_t *ptr_32, val;
     int16_t temp, *ptr_16;
-    static int16_t last_temp;
-    static int tick = 10, temp_period = 10;
-	int64_t timestamp = 0;
+    struct ads122_data *data = container_of(_work, struct ads122_data, work);
+    struct iio_dev *indio_dev = i2c_get_clientdata(data->client);
 
-    timestamp = iio_get_time_ns(indio_dev);
-	regmap_bulk_read(data->regmap, ADS122_CMD_RDATA, buf, 3);
-	regmap_bulk_read(data->regmap, ADS122_CMD_RDATA, buf, 3);
-    //iio_push_to_buffers_with_timestamp(indio_dev, buf, iio_get_time_ns(indio_dev));
-	printk("time : %lld\n", iio_get_time_ns(indio_dev) - timestamp);
+	buf = kzalloc(indio_dev->scan_bytes, GFP_KERNEL);
+    if (!buf) {
+        return;
+    }
 
+    ptr_32 = (int32_t *)buf;
+
+    mutex_lock(&data->lock);
+    if (test_bit(ADS122_PAIN3_NAIN2, indio_dev->active_scan_mask)) {
+        ret = ads122_get_adc_result(data, ADS122_PAIN3_NAIN2, &val);
+        if (ret < 0) {
+            mutex_unlock(&data->lock);
+            goto direct_out;
+        }
+        *ptr_32 = val;
+        ptr_32++;
+    }
+
+    if (test_bit(ADS122_PAIN1_NAIN0, indio_dev->active_scan_mask)) {
+        ret = ads122_get_adc_result(data, ADS122_PAIN1_NAIN0, &val);
+        if (ret < 0) {
+            mutex_unlock(&data->lock);
+            goto direct_out;
+        }
+        *ptr_32 = val;
+        ptr_32++;
+    }
+
+    if (test_bit(ADS122_TEMP, indio_dev->active_scan_mask)) {
+        ret = ads122_get_temper_result(data, &temp);
+        if (ret < 0) {
+            mutex_unlock(&data->lock);
+            goto direct_out;
+        }
+        ptr_16 = (int16_t *)ptr_32;
+        *ptr_16 = temp;
+    }
+
+    mutex_unlock(&data->lock);
+
+    if (indio_dev->scan_timestamp) {
+        iio_push_to_buffers_with_timestamp(indio_dev, buf, iio_get_time_ns(indio_dev));
+    } else {
+        iio_push_to_buffers(indio_dev, buf);
+    }
+
+direct_out:
+    kfree(buf);
     return;
 }
 
 enum hrtimer_restart hrtimer_callback(struct hrtimer *hr_timer)
 {
-    struct ads1015_data *data = container_of(hr_timer, struct ads1015_data, timer);
+    struct ads122_data *data = container_of(hr_timer, struct ads122_data, timer);
     schedule_work(&data->work);
     hrtimer_forward_now(&data->timer, data->ktime);
     return HRTIMER_RESTART;
 }
 
+#if 0
 static irqreturn_t ads1015_trigger_handler(int irq, void *p)
 {
 	struct iio_poll_func *pf = p;
@@ -719,8 +795,9 @@ err:
 
 	return IRQ_HANDLED;
 }
+#endif
 
-static int ads1015_set_scale(struct ads1015_data *data,
+static int ads1015_set_scale(struct ads122_data *data,
 			     struct iio_chan_spec const *chan,
 			     int scale, int uscale)
 {
@@ -738,25 +815,25 @@ static int ads1015_set_scale(struct ads1015_data *data,
 	return -EINVAL;
 }
 
-static int ads1015_set_data_rate(struct ads1015_data *data, int chan, int rate)
+static int ads1015_set_data_rate(struct ads122_data *data, int chan, int rate)
 {
 	int i;
 
-	for (i = 0; i < ARRAY_SIZE(ads1015_data_rate); i++) {
-		if (data->data_rate[i] == rate) {
-			data->channel_data[chan].data_rate = i;
-			return 0;
-		}
+	for (i = 0; i < ARRAY_SIZE(ads122_dr_tbl); i++) {
+        if (data->dr_tbl[0][i] == rate) {
+            data->channel_data[chan].dr = i;
+            return 0;
+        }
 	}
 
 	return -EINVAL;
 }
 
-static int ads1015_read_raw(struct iio_dev *indio_dev, struct iio_chan_spec const *chan,
+static int ads122_read_raw(struct iio_dev *indio_dev, struct iio_chan_spec const *chan,
                             int *val, int *val2, long mask)
 {
     int ret, idx;
-    struct ads1015_data *data = iio_priv(indio_dev);
+    struct ads122_data *data = iio_priv(indio_dev);
 
     mutex_lock(&data->lock);
     switch (mask) {
@@ -769,26 +846,30 @@ static int ads1015_read_raw(struct iio_dev *indio_dev, struct iio_chan_spec cons
                 break;
             }
 
-            ret = ads1015_get_adc_result(data, chan->address, val);
+            ret = ads122_get_adc_result(data, chan->address, val);
             if (ret < 0) {
                 break;
             }
 
-            //*val = sign_extend32(*val >> shift, 15 - shift);
             ret = IIO_VAL_INT;
-
             break;
         }
         case IIO_CHAN_INFO_SCALE: {
-            idx = data->channel_data[chan->address].pga;
-            *val = ads122_fullscale_range[idx];
-            *val2 = chan->scan_type.realbits - 1;
-            ret = IIO_VAL_FRACTIONAL_LOG2;
+            if (ADS122_TEMP == chan->address) {
+                *val = 1;
+                *val2 = 32;
+                ret = IIO_VAL_FRACTIONAL;
+            } else {
+                idx = data->channel_data[chan->address].gain;
+                *val = ads122_fullscale_range[idx];
+                *val2 = chan->scan_type.realbits - 1;
+                ret = IIO_VAL_FRACTIONAL_LOG2;
+            }
             break;
         }
         case IIO_CHAN_INFO_SAMP_FREQ: {
-            idx = data->channel_data[chan->address].data_rate;
-            *val = data->data_rate[0][idx];
+            idx = data->channel_data[chan->address].dr;
+            *val = data->dr_tbl[0][idx];
             ret = IIO_VAL_INT;
             break;
         }
@@ -802,11 +883,11 @@ static int ads1015_read_raw(struct iio_dev *indio_dev, struct iio_chan_spec cons
     return ret;
 }
 
-static int ads1015_write_raw(struct iio_dev *indio_dev,
-			     struct iio_chan_spec const *chan, int val,
-			     int val2, long mask)
+static int ads122_write_raw(struct iio_dev *indio_dev,
+                            struct iio_chan_spec const *chan, int val,
+                            int val2, long mask)
 {
-	struct ads1015_data *data = iio_priv(indio_dev);
+	struct ads122_data *data = iio_priv(indio_dev);
 	int ret;
 
 	mutex_lock(&data->lock);
@@ -831,7 +912,7 @@ static int ads1015_read_event(struct iio_dev *indio_dev,
 	enum iio_event_direction dir, enum iio_event_info info, int *val,
 	int *val2)
 {
-	struct ads1015_data *data = iio_priv(indio_dev);
+	struct ads122_data *data = iio_priv(indio_dev);
 	int ret;
 	unsigned int comp_queue;
 	int period;
@@ -839,27 +920,25 @@ static int ads1015_read_event(struct iio_dev *indio_dev,
 
 	mutex_lock(&data->lock);
 
-	switch (info) {
-	case IIO_EV_INFO_VALUE:
-		*val = (dir == IIO_EV_DIR_RISING) ?
-			data->thresh_data[chan->address].high_thresh :
-			data->thresh_data[chan->address].low_thresh;
-		ret = IIO_VAL_INT;
-		break;
-	case IIO_EV_INFO_PERIOD:
-		dr = data->channel_data[chan->address].data_rate;
-		comp_queue = data->thresh_data[chan->address].comp_queue;
-		period = ads1015_comp_queue[comp_queue] *
-			     USEC_PER_SEC / data->data_rate[0][dr];
+    switch (info) {
+        case IIO_EV_INFO_VALUE:
+            *val = (dir == IIO_EV_DIR_RISING) ? data->thresh_data[chan->address].high_thresh :
+                                                data->thresh_data[chan->address].low_thresh;
+            ret = IIO_VAL_INT;
+            break;
+        case IIO_EV_INFO_PERIOD:
+            dr = data->channel_data[chan->address].dr;
+            comp_queue = data->thresh_data[chan->address].comp_queue;
+            period = ads1015_comp_queue[comp_queue] * USEC_PER_SEC / data->dr_tbl[0][dr];
 
-		*val = period / USEC_PER_SEC;
-		*val2 = period % USEC_PER_SEC;
-		ret = IIO_VAL_INT_PLUS_MICRO;
-		break;
-	default:
-		ret = -EINVAL;
-		break;
-	}
+            *val = period / USEC_PER_SEC;
+            *val2 = period % USEC_PER_SEC;
+            ret = IIO_VAL_INT_PLUS_MICRO;
+            break;
+        default:
+            ret = -EINVAL;
+            break;
+    }
 
 	mutex_unlock(&data->lock);
 
@@ -871,7 +950,7 @@ static int ads1015_write_event(struct iio_dev *indio_dev,
 	enum iio_event_direction dir, enum iio_event_info info, int val,
 	int val2)
 {
-	struct ads1015_data *data = iio_priv(indio_dev);
+	struct ads122_data *data = iio_priv(indio_dev);
 	int realbits = chan->scan_type.realbits;
 	int ret = 0;
 	long long period;
@@ -892,12 +971,12 @@ static int ads1015_write_event(struct iio_dev *indio_dev,
 			data->thresh_data[chan->address].low_thresh = val;
 		break;
 	case IIO_EV_INFO_PERIOD:
-		dr = data->channel_data[chan->address].data_rate;
+		dr = data->channel_data[chan->address].dr;
 		period = val * USEC_PER_SEC + val2;
 
 		for (i = 0; i < ARRAY_SIZE(ads1015_comp_queue) - 1; i++) {
 			if (period <= ads1015_comp_queue[i] *
-					USEC_PER_SEC / data->data_rate[0][dr])
+					USEC_PER_SEC / data->dr_tbl[0][dr])
 				break;
 		}
 		data->thresh_data[chan->address].comp_queue = i;
@@ -916,7 +995,7 @@ static int ads1015_read_event_config(struct iio_dev *indio_dev,
 	const struct iio_chan_spec *chan, enum iio_event_type type,
 	enum iio_event_direction dir)
 {
-	struct ads1015_data *data = iio_priv(indio_dev);
+	struct ads122_data *data = iio_priv(indio_dev);
 	int ret = 0;
 
 	mutex_lock(&data->lock);
@@ -938,7 +1017,34 @@ static int ads1015_read_event_config(struct iio_dev *indio_dev,
 	return ret;
 }
 
-static int ads1015_enable_event_config(struct ads1015_data *data,
+#if 0
+static ssize_t ads122_store_interval(struct device *dev, struct device_attribute *attr,
+                                     const char *buf, size_t len)
+{
+    struct iio_dev *indio_dev = dev_to_iio_dev(dev);
+    struct ads122_data *data = iio_priv(indio_dev);
+
+    int ret, i, conv_time = 0;
+
+    ret = kstrtoul(buf, 10, &interval);
+    if (ret) {
+        return ret;
+    }
+
+    if (interval < ADS122_MIN_INTERVAL) {
+        return -EINVAL;
+    }
+
+    mutex_lock(&data->lock);
+
+    data->ktime = ktime_set(interval / 1000000, (interval % 1000000) * 1000);
+    mutex_unlock(&data->lock);
+
+    return len;
+}
+#endif
+
+static int ads1015_enable_event_config(struct ads122_data *data,
 	const struct iio_chan_spec *chan, int comp_mode)
 {
 	int low_thresh = data->thresh_data[chan->address].low_thresh;
@@ -975,7 +1081,7 @@ static int ads1015_enable_event_config(struct ads1015_data *data,
 
 	ads1015_event_channel_enable(data, chan->address, comp_mode);
 
-	ret = ads1015_get_adc_result(data, chan->address, &val);
+	ret = ads122_get_adc_result(data, chan->address, &val);
 	if (ret) {
 		ads1015_event_channel_disable(data, chan->address);
 		ads1015_set_power_state(data, false);
@@ -984,7 +1090,7 @@ static int ads1015_enable_event_config(struct ads1015_data *data,
 	return ret;
 }
 
-static int ads1015_disable_event_config(struct ads1015_data *data,
+static int ads1015_disable_event_config(struct ads122_data *data,
 	const struct iio_chan_spec *chan, int comp_mode)
 {
 	int ret;
@@ -1012,34 +1118,34 @@ static int ads1015_disable_event_config(struct ads1015_data *data,
 }
 
 static int ads1015_write_event_config(struct iio_dev *indio_dev,
-	const struct iio_chan_spec *chan, enum iio_event_type type,
-	enum iio_event_direction dir, int state)
+                                      const struct iio_chan_spec *chan, enum iio_event_type type,
+                                      enum iio_event_direction dir, int state)
 {
-	struct ads1015_data *data = iio_priv(indio_dev);
-	int ret;
-	int comp_mode = (dir == IIO_EV_DIR_EITHER) ?
-		ADS1015_CFG_COMP_MODE_WINDOW : ADS1015_CFG_COMP_MODE_TRAD;
+    int ret;
+    struct ads122_data *data = iio_priv(indio_dev);
+    int comp_mode = (dir == IIO_EV_DIR_EITHER) ? ADS1015_CFG_COMP_MODE_WINDOW : ADS1015_CFG_COMP_MODE_TRAD;
 
-	mutex_lock(&data->lock);
+    mutex_lock(&data->lock);
 
-	/* Prevent from enabling both buffer and event at a time */
-	ret = 0; //iio_device_claim_direct_mode(indio_dev);
-	if (ret) {
-		mutex_unlock(&data->lock);
-		return ret;
-	}
+    /* Prevent from enabling both buffer and event at a time */
+    ret = 0; //iio_device_claim_direct_mode(indio_dev);
+    if (ret) {
+        mutex_unlock(&data->lock);
+        return ret;
+    }
 
-	if (state)
-		ret = ads1015_enable_event_config(data, chan, comp_mode);
-	else
-		ret = ads1015_disable_event_config(data, chan, comp_mode);
+    if (state)
+        ret = ads1015_enable_event_config(data, chan, comp_mode);
+    else
+        ret = ads1015_disable_event_config(data, chan, comp_mode);
 
-	//iio_device_release_direct_mode(indio_dev);
-	mutex_unlock(&data->lock);
+    //iio_device_release_direct_mode(indio_dev);
+    mutex_unlock(&data->lock);
 
-	return ret;
+    return ret;
 }
 
+#if 0
 static irqreturn_t ads1015_event_handler(int irq, void *priv)
 {
 	struct iio_dev *indio_dev = priv;
@@ -1065,10 +1171,11 @@ static irqreturn_t ads1015_event_handler(int irq, void *priv)
 
 	return IRQ_HANDLED;
 }
+#endif
 
 static int ads1015_buffer_preenable(struct iio_dev *indio_dev)
 {
-	struct ads1015_data *data = iio_priv(indio_dev);
+	struct ads122_data *data = iio_priv(indio_dev);
 
 	/* Prevent from enabling both buffer and event at a time */
 	if (ads1015_event_channel_enabled(data))
@@ -1136,29 +1243,9 @@ static const struct attribute_group ads122_attribute_group = {
 	.attrs = ads122_attributes,
 };
 
-static const struct iio_info ads1015_info = {
-	.read_raw	= ads1015_read_raw,
-	.write_raw	= ads1015_write_raw,
-	.read_event_value = ads1015_read_event,
-	.write_event_value = ads1015_write_event,
-	.read_event_config = ads1015_read_event_config,
-	.write_event_config = ads1015_write_event_config,
-	.attrs          = &ads1015_attribute_group,
-};
-
-static const struct iio_info ads1115_info = {
-	.read_raw	= ads1015_read_raw,
-	.write_raw	= ads1015_write_raw,
-	.read_event_value = ads1015_read_event,
-	.write_event_value = ads1015_write_event,
-	.read_event_config = ads1015_read_event_config,
-	.write_event_config = ads1015_write_event_config,
-	.attrs          = &ads1115_attribute_group,
-};
-
 static const struct iio_info ads122_info = {
-	.read_raw	= ads1015_read_raw,
-	.write_raw	= ads1015_write_raw,
+	.read_raw	= ads122_read_raw,
+	.write_raw	= ads122_write_raw,
 	.read_event_value = ads1015_read_event,
 	.write_event_value = ads1015_write_event,
 	.read_event_config = ads1015_read_event_config,
@@ -1166,6 +1253,7 @@ static const struct iio_info ads122_info = {
 	.attrs          = &ads122_attribute_group,
 };
 
+#if 0
 #ifdef CONFIG_OF
 static int ads1015_get_channels_config_of(struct i2c_client *client)
 {
@@ -1225,19 +1313,19 @@ static int ads1015_get_channels_config_of(struct i2c_client *client)
 	return 0;
 }
 #endif
+#endif
 
-static void ads1015_get_channels_config(struct i2c_client *client)
+static void ads122_get_channels_config(struct i2c_client *client)
 {
-	unsigned int k;
+	int i;
 
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
-	struct ads1015_data *data = iio_priv(indio_dev);
+	struct ads122_data *data = iio_priv(indio_dev);
 	struct ads1015_platform_data *pdata = dev_get_platdata(&client->dev);
 
 	/* prefer platform data */
 	if (pdata) {
-		memcpy(data->channel_data, pdata->channel_data,
-                sizeof(data->channel_data));
+		memcpy(data->channel_data, pdata->channel_data, sizeof(data->channel_data));
 		return;
 	}
 
@@ -1249,22 +1337,17 @@ static void ads1015_get_channels_config(struct i2c_client *client)
 #endif
 
 	/* fallback on default configuration */
-    for (k = 0; k < ADS122_CHANNELS; ++k) {
-        data->channel_data[k].pga = ADS122_DEFAULT_PGA;
-        data->channel_data[k].gain = ADS122_DEFAULT_GAIN;
-        data->channel_data[k].op_mode = ADS122_DEFAULT_OP_MODE;
-        data->channel_data[k].data_rate = 0;
+    for (i = 0; i < ADS122_CHANNELS; i++) {
+        data->channel_data[i].pga = ADS122_DEFAULT_PGA;
+        data->channel_data[i].gain = ADS122_DEFAULT_GAIN;
+        data->channel_data[i].mode = ADS122_DEFAULT_OP_MODE;
+        data->channel_data[i].dr = 0;
     }
+
+    return;
 }
 
-static int ads1015_set_conv_mode(struct ads1015_data *data, int mode)
-{
-	return regmap_update_bits(data->regmap, ADS1015_CFG_REG,
-				             ADS1015_CFG_MOD_MASK,
-				             mode << ADS1015_CFG_MOD_SHIFT);
-}
-
-static int ads122_set_conv_mode(struct ads1015_data *data, int mode)
+static int ads122_set_conv_mode(struct ads122_data *data, int mode)
 {
     return regmap_update_bits(data->regmap, ADS122_REG_1 + ADS122_CMD_WREG,
                               ADS122_CFG_MOD_MASK, mode);
@@ -1280,7 +1363,7 @@ static int ads122_ring_preenable(struct iio_dev *indio_dev)
 
 static int ads122_ring_postenable(struct iio_dev *indio_dev)
 {
-    struct ads1015_data *data = iio_priv(indio_dev);
+    struct ads122_data *data = iio_priv(indio_dev);
     hrtimer_start(&data->timer, data->ktime, HRTIMER_MODE_REL);
     printk("ads122 ring enable\n");
     return 0;
@@ -1288,14 +1371,14 @@ static int ads122_ring_postenable(struct iio_dev *indio_dev)
 
 static int ads122_ring_postdisable(struct iio_dev *indio_dev)
 {
-    struct ads1015_data *data = iio_priv(indio_dev);
+    struct ads122_data *data = iio_priv(indio_dev);
     int ret;
 
     cancel_work_sync(&data->work);
 
     ret = hrtimer_cancel(&data->timer);
     if (ret)
-        printk("The timer was still in use...\n");
+        printk("the timer was still in use...\n");
 
     printk("hr Timer module uninstalling\n");
 
@@ -1325,14 +1408,13 @@ static int ads122_register_ring(struct iio_dev *indio_dev)
 
 struct i2c_client *ads122_1_client = NULL;
 struct i2c_client *ads122_2_client = NULL;
-static unsigned long interval = 200000; /* unit: us */
+
 static int ads122_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
+    int i, ret;
     struct iio_dev *indio_dev;
-    struct ads1015_data *data;
-    int ret;
+    struct ads122_data *data;
     enum chip_ids chip;
-    int i;
 
     indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*data));
     if (!indio_dev)
@@ -1345,12 +1427,12 @@ static int ads122_probe(struct i2c_client *client, const struct i2c_device_id *i
 
     indio_dev->dev.parent = &client->dev;
     indio_dev->dev.of_node = client->dev.of_node;
-    indio_dev->modes = (INDIO_BUFFER_SOFTWARE | INDIO_DIRECT_MODE);
+    indio_dev->modes = INDIO_BUFFER_SOFTWARE | INDIO_DIRECT_MODE;
 
     indio_dev->channels = ads122_chnnels;
     indio_dev->num_channels = ARRAY_SIZE(ads122_chnnels);
     indio_dev->info = &ads122_info;
-    data->data_rate = ads122_data_rate;
+    data->dr_tbl = ads122_dr_tbl;
     data->client = client;
     chip = id->driver_data;
     switch (chip) {
@@ -1366,26 +1448,28 @@ static int ads122_probe(struct i2c_client *client, const struct i2c_device_id *i
             break;
     }
 
-	data->event_channel = ADS122_CHANNELS;
-	/*
-	 * Set default lower and upper threshold to min and max value
-	 * respectively.
-	 */
-	for (i = 0; i < ADS122_CHANNELS; i++) {
-		int realbits = indio_dev->channels[i].scan_type.realbits;
+    data->event_channel = ADS122_CHANNELS;
+    /*
+     * Set default lower and upper threshold to min and max value
+     * respectively.
+     */
+    for (i = 0; i < ADS122_CHANNELS; i++) {
+        int realbits = indio_dev->channels[i].scan_type.realbits;
 
-		data->thresh_data[i].low_thresh = -1 << (realbits - 1);
-		data->thresh_data[i].high_thresh = (1 << (realbits - 1)) - 1;
-	}
+        data->thresh_data[i].low_thresh = -1 << (realbits - 1);
+        data->thresh_data[i].high_thresh = (1 << (realbits - 1)) - 1;
+    }
 
-	/* we need to keep this ABI the same as used by hwmon ADS1015 driver */
-	ads1015_get_channels_config(client);
+    /* we need to keep this ABI the same as used by hwmon ADS1015 driver */
+    ads122_get_channels_config(client);
 
-	data->regmap = devm_regmap_init_i2c(client, &ads122_regmap_config);
-	if (IS_ERR(data->regmap)) {
-		dev_err(&client->dev, "Failed to allocate register map\n");
-		return PTR_ERR(data->regmap);
-	}
+    data->regmap = devm_regmap_init_i2c(client, &ads122_regmap_config);
+        if (IS_ERR(data->regmap)) {
+            dev_err(&client->dev, "Failed to allocate register map\n");
+            return PTR_ERR(data->regmap);
+    }
+    regcache_cache_bypass(data->regmap, true);
+
 
 #if 0
 	ret = devm_iio_triggered_buffer_setup(&client->dev, indio_dev, NULL,
@@ -1431,9 +1515,11 @@ static int ads122_probe(struct i2c_client *client, const struct i2c_device_id *i
 			return ret;
 	}
 #endif
-    /* reset chip */
+
+    /* reset chip for configure */
     ads122_write_cmd(client, ADS122_CMD_RESET);
     usleep_range(10000, 10000 + 1);
+
     ret = ads122_set_conv_mode(data, ADS122_SINGLESHOT);
     if (ret) {
         dev_err(&client->dev, "Failed to set continuous mode\n");
@@ -1445,18 +1531,8 @@ static int ads122_probe(struct i2c_client *client, const struct i2c_device_id *i
     if (ret)
         return ret;
 
-/* disable runtime */
-#if 0
-    ret = pm_runtime_set_active(&client->dev);
-    if (ret)
-        return ret;
-    pm_runtime_set_autosuspend_delay(&client->dev, ADS1015_SLEEP_DELAY_MS);
-    pm_runtime_use_autosuspend(&client->dev);
-    pm_runtime_enable(&client->dev);
-#endif
-
     ret = iio_device_register(indio_dev);
-        if (ret < 0) {
+    if (ret < 0) {
         dev_err(&client->dev, "Failed to register IIO device\n");
         return ret;
     }
@@ -1473,7 +1549,7 @@ static int ads122_probe(struct i2c_client *client, const struct i2c_device_id *i
 static int ads122_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
-	struct ads1015_data *data = iio_priv(indio_dev);
+	struct ads122_data *data = iio_priv(indio_dev);
 
 	iio_device_unregister(indio_dev);
 
@@ -1491,7 +1567,7 @@ static int ads122_remove(struct i2c_client *client)
 static int ads1015_runtime_suspend(struct device *dev)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(to_i2c_client(dev));
-	struct ads1015_data *data = iio_priv(indio_dev);
+	struct ads122_data *data = iio_priv(indio_dev);
 
 	return ads122_set_conv_mode(data, ADS122_SINGLESHOT);
 }
@@ -1499,7 +1575,7 @@ static int ads1015_runtime_suspend(struct device *dev)
 static int ads122_runtime_suspend(struct device *dev)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(to_i2c_client(dev));
-	struct ads1015_data *data = iio_priv(indio_dev);
+	struct ads122_data *data = iio_priv(indio_dev);
 
 	return ads122_set_conv_mode(data, ADS122_SINGLESHOT);
 }
@@ -1507,7 +1583,7 @@ static int ads122_runtime_suspend(struct device *dev)
 static int ads1015_runtime_resume(struct device *dev)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(to_i2c_client(dev));
-	struct ads1015_data *data = iio_priv(indio_dev);
+	struct ads122_data *data = iio_priv(indio_dev);
 	int ret;
 
 	ret = ads122_set_conv_mode(data, ADS122_CONTINUOUS);
@@ -1520,7 +1596,7 @@ static int ads1015_runtime_resume(struct device *dev)
 static int ads122_runtime_resume(struct device *dev)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(to_i2c_client(dev));
-	struct ads1015_data *data = iio_priv(indio_dev);
+	struct ads122_data *data = iio_priv(indio_dev);
 	int ret;
 
 	ret = ads122_set_conv_mode(data, ADS122_CONTINUOUS);
@@ -1542,9 +1618,9 @@ static const struct dev_pm_ops ads122_pm_ops = {
 };
 
 static const struct i2c_device_id ads122_id[] = {
-	{"ads122-0", ADS122_0},
-	{"ads122-1", ADS122_1},
-	{}
+    {"ads122-0", ADS122_0},
+    {"ads122-1", ADS122_1},
+    {}
 };
 MODULE_DEVICE_TABLE(i2c, ads122_id);
 

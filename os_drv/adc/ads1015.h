@@ -22,7 +22,7 @@
 #define LINUX_ADS1015_H
 
 #define ADS1015_CHANNELS 8
-#define ADS122_CHANNELS  15
+#define ADS122_CHANNELS  17
 
 struct ads1015_channel_data {
     bool enabled;
@@ -32,6 +32,15 @@ struct ads1015_channel_data {
     unsigned int data_rate;
 
     unsigned int dcnt;
+};
+
+struct ads122_channel_data {
+    bool enabled;
+    int pga;
+    int gain;
+    int mode;        /* operation mode 0:normal mode, 1:turbo mode */
+    int dr;          /* data rate */
+    int dcnt;
 };
 
 struct ads1015_platform_data {
