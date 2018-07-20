@@ -73,7 +73,11 @@ int bno055_sensor_init(struct iio_context *ctx)
 {
     static struct iio_device *dev;
 
-    ASSERT((dev = iio_context_find_device(ctx, "bno055")) && "No bno055");
+    dev = iio_context_find_device(ctx, "bno055");
+    if (!dev) {
+        printf("could not find iio_dev:bno055\n");
+        return -1;
+    }
 
     for (int i = 0; i < iio_device_get_channels_count(dev); ++i) {
         struct iio_channel *chn = iio_device_get_channel(dev, i);
@@ -85,6 +89,8 @@ int bno055_sensor_init(struct iio_context *ctx)
     if (0 == channel_count) {
         printf("No scan elements found \n");
     }
+
+    iio_device_attr_write(dev, "interval", "1000000");
 
     channels = (iio_channel **)calloc(channel_count, sizeof *channels);
     if (!channels) {
@@ -102,9 +108,9 @@ int bno055_sensor_init(struct iio_context *ctx)
         iio_channel_enable(channels[i]);
     }
 
-    rxbuf = iio_device_create_buffer(dev, 4, false);
+    rxbuf = iio_device_create_buffer(dev, 1, false);
     if (!rxbuf) {
-        printf("Could not create rx buffer");
+        printf("Could not create rx buffer\n");
     }
 
     bno055_dev = dev;

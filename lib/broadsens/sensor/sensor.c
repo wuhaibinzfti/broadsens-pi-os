@@ -1,7 +1,12 @@
 #include <stdio.h>
 #include <iio.h>
 #include <string.h>
+#include <unistd.h>
+#include <time.h>
+
+/* sensor api */
 #include "bno055.h"
+#include "ads122.h"
 
 #define ASSERT(expr) { \
 	if (!(expr)) { \
@@ -81,24 +86,43 @@ int sensor_init(void)
     ASSERT(iio_context_get_devices_count(ctx) > 0 && "No devices");
 
     bno055_sensor_init(ctx);
+    ads122_sensor_init(ctx);
 
     return 0;
 }
 
 int main(int argc, char **argv)
 {
-    struct timeval tv;
     float buffer[10];
     int ret;
+    unsigned long tick = 0;
+    float value = 0.0;
+    struct timespec time;
+    struct timeval tv;
+
+    time.tv_sec = 0;
+    time.tv_nsec = 1000;
 
     sensor_init();
 
     while (1) {
+        #if 0
         ret = read_bno055_sensor_buffer(buffer, &tv);
         if (ret >= 0) {
             printf("%.2f  %.2f  %.2f  [%ld.%ld]\n", buffer[0], buffer[1], buffer[2],
-                                                  tv.tv_sec, tv.tv_usec);
+                                                    tv.tv_sec, tv.tv_usec);
         }
+        #endif
+        ret = ads122_read_channel(0, buffer, &tv);
+        if (0 == ret)
+            printf("%.2f  %.2f  %.2f  [%ld.%ld]\n", buffer[0], buffer[1], buffer[2],
+                                                    tv.tv_sec, tv.tv_usec);
+
+        //printf("tick:%d\n", tick);
+
+        tick++;
+        nanosleep(&time, NULL);
     }
+
     return 0;
 }
