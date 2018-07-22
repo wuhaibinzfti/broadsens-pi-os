@@ -37,9 +37,8 @@ int ads122_read_channel(int chn, float *buffer, struct timeval *tv)
     for (i = 0; i < channel_count - 1; i++) {
         fmt = iio_channel_get_data_format(channels[i]);
         sample_size = fmt->length / 8;
-        printf("is_fully_defined %d\n", fmt->is_fully_defined);
         bytes = iio_channel_read(channels[i], rxbuf, buf, sample_size);
-        if (sample_size != bytes) {
+        if (bytes < 0) {
             return -1;
         }
 
@@ -56,7 +55,6 @@ int ads122_read_channel(int chn, float *buffer, struct timeval *tv)
         buffer[i] = val;
     }
 
-
     /* timestamp */
     fmt = iio_channel_get_data_format(channels[i]);
     sample_size = fmt->length / 8;
@@ -65,7 +63,7 @@ int ads122_read_channel(int chn, float *buffer, struct timeval *tv)
         return -1;
     }
     tv->tv_sec = ((int64_t *)buf)[0] / 1000000000;
-    tv->tv_usec = ((int64_t *)buf)[0] % 1000000 / 1000;
+    tv->tv_usec = ((int64_t *)buf)[0] % 1000000000 / 1000;
 
     return 0;
 }
@@ -107,6 +105,7 @@ int ads122_sensor_init(struct iio_context *ctx)
         printf("Could not create rx buffer\n");
     }
 
+    iio_buffer_set_blocking_mode(rxbuf, false);
     ads122_dev = dev;
     return 0;
 }

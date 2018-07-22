@@ -86,7 +86,8 @@ int sensor_init(void)
     ASSERT(iio_context_get_devices_count(ctx) > 0 && "No devices");
 
     bno055_sensor_init(ctx);
-    ads122_sensor_init(ctx);
+    if (ads122_sensor_init(ctx) < 0)
+        return -1;
 
     return 0;
 }
@@ -95,7 +96,7 @@ int main(int argc, char **argv)
 {
     float buffer[10];
     int ret;
-    unsigned long tick = 0;
+    unsigned long tick = 0, pr_ctrl = 0;
     float value = 0.0;
     struct timespec time;
     struct timeval tv;
@@ -103,7 +104,8 @@ int main(int argc, char **argv)
     time.tv_sec = 0;
     time.tv_nsec = 1000;
 
-    sensor_init();
+    if (sensor_init() < 0)
+        return -1;
 
     while (1) {
         #if 0
@@ -114,12 +116,14 @@ int main(int argc, char **argv)
         }
         #endif
         ret = ads122_read_channel(0, buffer, &tv);
-        if (0 == ret)
+        if (0 == ret) {
             printf("%.2f  %.2f  %.2f  [%ld.%ld]\n", buffer[0], buffer[1], buffer[2],
                                                     tv.tv_sec, tv.tv_usec);
-
-        //printf("tick:%d\n", tick);
-
+        }
+        if (pr_ctrl >= 10000) {
+            pr_ctrl = 0;
+        }
+        pr_ctrl++;
         tick++;
         nanosleep(&time, NULL);
     }
