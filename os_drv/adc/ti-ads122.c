@@ -43,6 +43,7 @@
 #include <linux/iio/kfifo_buf.h>
 #include <linux/iio/triggered_buffer.h>
 #include <linux/iio/trigger_consumer.h>
+#include <linux/iio/trigger.h>
 
 #define ADS1015_DRV_NAME "ads1015"
 #define ADS122_DRV_NAME "ads122"
@@ -163,8 +164,7 @@ enum ads122_channels {
 	ADS122_AINP_AVDDVSS,
 	ADS122_PREF_NREF,
 	ADS122_TEMP,
-	ADS122_TIMESTAMP,
-	ADS122_CHANNELS_NUM,
+	ADS122_CHANNEL_NUM,
 };
 
 enum
@@ -218,6 +218,8 @@ struct ads1015_channel_data {
 
 struct ads122_channel_data {
     bool enabled;
+    int tick;
+    int interval;
     int pga;
     int gain;
     int mode;        /* operation mode 0:normal mode, 1:turbo mode */
@@ -226,7 +228,7 @@ struct ads122_channel_data {
 };
 
 struct ads1015_platform_data {
-	struct ads1015_channel_data channel_data[ADS122_CHANNELS_NUM];
+	struct ads1015_channel_data channel_data[ADS122_CHANNEL_NUM];
 };
 
 static const unsigned int ads1015_data_rate[] = {
@@ -261,7 +263,6 @@ static int32_t ads122_fullscale_range[] = {
 };
 
 #define ADS122_MIN_INTERVAL 1000
-static unsigned long interval = 1000000; /* unit: us */
 
 /*
  * Translation from COMP_QUE field value to the number of successive readings
@@ -393,7 +394,7 @@ static const struct iio_event_spec ads1015_events[] = {
     .datasheet_name = "AIN"#_chan,				       \
 }
 
-#define ADS122_V_DIFF_CHAN(_chan, _chan2, _addr, _si) {      \
+#define ADS122_V_DIFF_CHAN(_chan, _chan2, _addr, _si) { \
     .type = IIO_VOLTAGE,                                \
     .differential = 1,	                                  \
     .indexed = 1,                                       \
@@ -415,20 +416,32 @@ static const struct iio_event_spec ads1015_events[] = {
     .datasheet_name = "PAIN"#_chan"-NAIN"#_chan2,	   \
 }
 
-#define ADS122_TEMP_CHAN(_addr, _si) {                       \
+#define ADS122_TEMP_CHAN(_addr, _si) {                  \
     .type = IIO_TEMP,					                \
     .indexed = 1,                                       \
     .channel = 0,                                       \
     .address = _addr,                                   \
     .info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |      \
                           BIT(IIO_CHAN_INFO_SCALE),     \
-    .scan_index = _si,                                \
+    .scan_index = _si,                                  \
     .scan_type = {                                      \
         .sign = 's',                                    \
         .realbits = 14,                                 \
         .shift = 2,                                     \
         .storagebits = 16,                              \
     },                                                  \
+}
+
+#define ADS122_ADC_CTL(_si) {					\
+	.type = IIO_VOLTAGE,						\
+	.channel = -1,							\
+	.scan_index = _si,						\
+	.scan_type = {							\
+		.sign = 's',						    \
+		.realbits = 24,					    \
+		.storagebits = 32,					\
+		.endianness = IIO_CPU,	                  \
+     },						               	\
 }
 
 struct ads1015_thresh_data {
@@ -445,11 +458,12 @@ struct ads122_data {
     * data reads, configuration updates
     */
     struct mutex lock;
-    struct ads122_channel_data channel_data[ADS122_CHANNELS_NUM];
+    struct ads122_channel_data channel_data[ADS122_CHANNEL_NUM];
 
+    unsigned int current_channel;
     unsigned int event_channel;
     unsigned int comp_mode;
-    struct ads1015_thresh_data thresh_data[ADS122_CHANNELS_NUM];
+    struct ads1015_thresh_data thresh_data[ADS122_CHANNEL_NUM];
 
     const unsigned int (*dr_tbl)[7];
     /*
@@ -458,15 +472,19 @@ struct ads122_data {
     * getting the stale result from the conversion register.
     */
     bool conv_invalid;
-
+    bool block_mode;
     struct work_struct work;
     struct hrtimer timer;
     ktime_t ktime;
+
+    unsigned long tick;    /* unit:us */
+
+    struct iio_trigger *trigger;
 };
 
 static bool ads1015_event_channel_enabled(struct ads122_data *data)
 {
-	return (data->event_channel != ADS122_CHANNELS_NUM);
+	return (data->event_channel != ADS122_CHANNEL_NUM);
 }
 
 static void ads1015_event_channel_enable(struct ads122_data *data, int chan,
@@ -480,7 +498,7 @@ static void ads1015_event_channel_enable(struct ads122_data *data, int chan,
 
 static void ads1015_event_channel_disable(struct ads122_data *data, int chan)
 {
-	data->event_channel = ADS122_CHANNELS_NUM;
+	data->event_channel = ADS122_CHANNEL_NUM;
 }
 
 static bool ads1015_is_writeable_reg(struct device *dev, unsigned int reg)
@@ -529,11 +547,11 @@ static const struct iio_chan_spec ads122_chnnels[] = {
     //ADS122_V_DIFF_CHAN(0, 1, ADS122_PAIN0_NAIN1, -1),
     //ADS122_V_DIFF_CHAN(0, 2, ADS122_PAIN0_NAIN2, -1),
     //ADS122_V_DIFF_CHAN(0, 3, ADS122_PAIN0_NAIN3, -1),
-    ADS122_V_DIFF_CHAN(1, 0, ADS122_PAIN1_NAIN0, 0),
+    ADS122_V_DIFF_CHAN(1, 0, ADS122_PAIN1_NAIN0, -1),
     //ADS122_V_DIFF_CHAN(1, 2, ADS122_PAIN1_NAIN2, -1),
     //ADS122_V_DIFF_CHAN(1, 3, ADS122_PAIN1_NAIN3, -1),
     //ADS122_V_DIFF_CHAN(2, 3, ADS122_PAIN2_NAIN3, -1),
-    ADS122_V_DIFF_CHAN(3, 2, ADS122_PAIN3_NAIN2, 1),
+    ADS122_V_DIFF_CHAN(3, 2, ADS122_PAIN3_NAIN2, -1),
     //ADS122_V_CHAN(0, ADS122_PAIN0_NAVSS, -1),
     //ADS122_V_CHAN(1, ADS122_PAIN1_NAVSS, -1),
     //ADS122_V_CHAN(2, ADS122_PAIN2_NAVSS, -1),
@@ -542,14 +560,9 @@ static const struct iio_chan_spec ads122_chnnels[] = {
     //ADS122_V_CHAN(5, ADS122_AVDD_AVSS_4, -1),
     //ADS122_V_CHAN(6, ADS122_AINP_AVDDVSS, -1),
     //ADS122_V_CHAN(7, ADS122_PREF_NREF, -1),
-    ADS122_TEMP_CHAN(ADS122_TEMP, 2),
-    IIO_CHAN_SOFT_TIMESTAMP(3),
-};
-
-static int ads122_scan[] = {
-    ADS122_PAIN1_NAIN0,
-    ADS122_PAIN3_NAIN2,
-    ADS122_TEMP,
+    ADS122_TEMP_CHAN(ADS122_TEMP, -1),
+    ADS122_ADC_CTL(0),
+    IIO_CHAN_SOFT_TIMESTAMP(1),
 };
 
 
@@ -565,7 +578,7 @@ static int ads122_write_cmd(struct i2c_client *client, unsigned char cmd)
 
     ret = i2c_transfer(client->adapter, &msg, 1);
     if (ret < 0) {
-        printk("i2c transfer error!\n");
+        dev_err(&client->dev, "i2c transfer error!\n");
     }
 
     return ret;
@@ -588,12 +601,12 @@ static int ads1015_set_power_state(struct ads122_data *data, bool on)
 	return ret < 0 ? ret : 0;
 }
 
-static int ads122_get_adc_result(struct ads122_data *data, int chan, void *dst)
+static int ads122_get_adc_result(struct ads122_data *data, int chan, __u8 *dst)
 {
     __u8 buf[10] = {0};
     int ret, dr, mode, conv_time, old, cfg;
 
-    if (chan < 0 || chan >= ADS122_CHANNELS_NUM) {
+    if (chan < 0 || chan >= ADS122_CHANNEL_NUM) {
         return -EINVAL;
     }
 
@@ -652,64 +665,76 @@ static int ads122_get_adc_result(struct ads122_data *data, int chan, void *dst)
         }
     }
     else {
-        printk("conversion not finish, try again\n");
+        dev_err(&data->client->dev, "conver not finish\n");
         return -EAGAIN;
     }
 
-    if (ADS122_TEMP == chan) {
-        *((int16_t *)dst) = buf[1] << 8 | buf[2];
-        return 2;
-    } else {
-        *((int32_t *)dst) = buf[1] << 16 | buf[2] << 8 | buf[3];
-        return 4;
-    }
+    memcpy(dst, buf + 1, 3);
+    return 3;
 }
 
 static void ads122_work(struct work_struct *_work)
 {
-    int ret, len, index;
-    __u8 *buf;
+    int chan;
+    __u8 *buf, src[8];
+
     struct ads122_data *data = container_of(_work, struct ads122_data, work);
     struct iio_dev *indio_dev = i2c_get_clientdata(data->client);
 
-	buf = kzalloc(indio_dev->scan_bytes, GFP_KERNEL);
-    if (!buf) {
-        return;
+    if (indio_dev->scan_bytes <= 0) {
+        goto err;
     }
 
-    mutex_lock(&data->lock);
-    for (len = 0, index = 0; index < ARRAY_SIZE(ads122_scan); index++) {
-        if (test_bit(index, indio_dev->active_scan_mask)) {
-            ret = ads122_get_adc_result(data, ads122_scan[index], buf + len);
-            if (ret < 0) {
-                mutex_unlock(&data->lock);
-                goto err;
+    buf = kzalloc(indio_dev->scan_bytes, GFP_KERNEL);
+    if (!buf) {
+        goto err;
+    }
+
+    if (test_bit(0, indio_dev->active_scan_mask)) {
+        for (chan = 0; chan < ADS122_CHANNEL_NUM; chan++) {
+            struct ads122_channel_data *chan_data = &data->channel_data[chan];
+            if (!chan_data->enabled) {
+                continue;
             }
-            len += ret;
+            if (chan_data->tick < chan_data->interval) {
+                chan_data->tick++;
+                continue;
+            } else {
+                chan_data->tick = 0;
+            }
+            if (ads122_get_adc_result(data, chan, src) < 0) {
+                break;
+            }
+
+            /* push data to ring buffer */
+            *((uint32_t *)buf) = (__u8)chan << 24 | src[0] << 16 | src[1] << 8 | src[2];
+            if (indio_dev->scan_timestamp) {
+                iio_push_to_buffers_with_timestamp(indio_dev, buf, iio_get_time_ns(indio_dev));
+            } else {
+                iio_push_to_buffers(indio_dev, buf);
+            }
         }
     }
+
+    kfree(buf);
+err:
+    mutex_lock(&data->lock);
     data->conv_invalid = true;
     mutex_unlock(&data->lock);
-
-    if (indio_dev->scan_timestamp) {
-        iio_push_to_buffers_with_timestamp(indio_dev, buf, iio_get_time_ns(indio_dev));
-    } else {
-        iio_push_to_buffers(indio_dev, buf);
-    }
-
-err:
-    kfree(buf);
     return;
 }
 
-enum hrtimer_restart hrtimer_callback(struct hrtimer *hr_timer)
+enum hrtimer_restart ads122_hrtimer_callback(struct hrtimer *hr_timer)
 {
     struct ads122_data *data = container_of(hr_timer, struct ads122_data, timer);
 
+    mutex_lock(&data->lock);
     if (data->conv_invalid) {
         data->conv_invalid = false;
         schedule_work(&data->work);
     }
+    mutex_unlock(&data->lock);
+
     hrtimer_forward_now(&data->timer, data->ktime);
     return HRTIMER_RESTART;
 }
@@ -751,22 +776,15 @@ static int ads122_read_raw(struct iio_dev *indio_dev, struct iio_chan_spec const
 {
     int ret, idx;
     struct ads122_data *data = iio_priv(indio_dev);
+    __u8 buf[4];
 
     mutex_lock(&data->lock);
     switch (mask) {
         case IIO_CHAN_INFO_RAW: {
-            if (ads1015_event_channel_enabled(data) &&
-                data->event_channel != chan->address) {
-                ret = -EBUSY;
+            ret = ads122_get_adc_result(data, chan->address, buf);
+            if (ret < 0)
                 break;
-            }
-
-            ret = ads122_get_adc_result(data, chan->address, val);
-            if (ret < 0) {
-                break;
-            }
-
-            *val = *val >> chan->scan_type.shift;
+            *val = buf[0] << 16 | buf[1] << 8 | buf[2];
             *val = sign_extend32(*val, chan->scan_type.realbits - 1);
 
             ret = IIO_VAL_INT;
@@ -796,8 +814,8 @@ static int ads122_read_raw(struct iio_dev *indio_dev, struct iio_chan_spec const
             break;
         }
     }
-
     mutex_unlock(&data->lock);
+
     return ret;
 }
 
@@ -935,42 +953,41 @@ static int ads1015_read_event_config(struct iio_dev *indio_dev,
 	return ret;
 }
 
-static ssize_t ads122_show_interval(struct device *dev,
-                                     struct device_attribute *attr,
-                                     char *buf)
-{
-    return sprintf(buf, "%lu\n", interval);
-}
-
-static ssize_t ads122_store_interval(struct device *dev, struct device_attribute *attr,
-                                     const char *buf, size_t len)
+static ssize_t ads122_show_tick(struct device *dev, struct device_attribute *attr, char *buf)
 {
     struct iio_dev *indio_dev = dev_to_iio_dev(dev);
     struct ads122_data *data = iio_priv(indio_dev);
 
-    int ret, i, conv_time = 0;
+    return sprintf(buf, "%ld\n", data->tick);
+}
 
-    ret = kstrtoul(buf, 10, &interval);
-    if (ret) {
+static ssize_t ads122_store_tick(struct device *dev, struct device_attribute *attr,
+                                     const char *buf, size_t len)
+{
+    int ret;
+    unsigned long tick;
+    struct iio_dev *indio_dev = dev_to_iio_dev(dev);
+    struct ads122_data *data = iio_priv(indio_dev);
+
+    ret = kstrtoul(buf, 10, &tick);
+    if (ret)
         return ret;
-    }
 
-    if (interval < ADS122_MIN_INTERVAL) {
+    if (tick < 1000)
         return -EINVAL;
-    }
 
     mutex_lock(&data->lock);
-
-    data->ktime = ktime_set(interval / 1000000, (interval % 1000000) * 1000);
+    data->ktime = ktime_set(tick / 1000000, (tick % 1000000) * 1000);
+    data->tick = tick;
     mutex_unlock(&data->lock);
 
     return len;
 }
 
-static IIO_DEVICE_ATTR( interval, S_IRUGO | S_IWUSR,
-                        ads122_show_interval,
-                        ads122_store_interval,
-                        0);
+static IIO_DEVICE_ATTR(tick, S_IRUGO | S_IWUSR,
+                       ads122_show_tick,
+                       ads122_store_tick,
+                       0);
 
 
 static int ads1015_enable_event_config(struct ads122_data *data,
@@ -1107,7 +1124,7 @@ static IIO_CONST_ATTR_NAMED(ads122_sampling_frequency_available,
 static struct attribute *ads122_attributes[] = {
 	&iio_const_attr_ads122_scale_available.dev_attr.attr,
 	&iio_const_attr_ads122_sampling_frequency_available.dev_attr.attr,
-	&iio_dev_attr_interval.dev_attr.attr,
+	&iio_dev_attr_tick.dev_attr.attr,
 	NULL,
 };
 
@@ -1209,12 +1226,24 @@ static void ads122_get_channels_config(struct i2c_client *client)
 #endif
 
 	/* fallback on default configuration */
-    for (i = 0; i < ADS122_CHANNELS_NUM; i++) {
+    for (i = 0; i < ADS122_CHANNEL_NUM; i++) {
         data->channel_data[i].pga = ADS122_DEFAULT_PGA;
         data->channel_data[i].gain = ADS122_DEFAULT_GAIN;
         data->channel_data[i].mode = ADS122_DEFAULT_OP_MODE;
         data->channel_data[i].dr = 0;
     }
+
+    data->channel_data[ADS122_PAIN1_NAIN0].enabled = true;
+    data->channel_data[ADS122_PAIN1_NAIN0].tick = 0;
+    data->channel_data[ADS122_PAIN1_NAIN0].interval = 0;
+
+    data->channel_data[ADS122_PAIN3_NAIN2].enabled = true;
+    data->channel_data[ADS122_PAIN3_NAIN2].tick = 0;
+    data->channel_data[ADS122_PAIN3_NAIN2].interval = 0;
+
+    data->channel_data[ADS122_TEMP].enabled = true;
+    data->channel_data[ADS122_TEMP].tick = 0;
+    data->channel_data[ADS122_TEMP].interval = 10;
 
     return;
 }
@@ -1229,39 +1258,36 @@ static int ads122_ring_preenable(struct iio_dev *indio_dev)
 {
     if (bitmap_empty(indio_dev->active_scan_mask, indio_dev->masklength))
         return -EINVAL;
-    printk("ads122 ring preenable\n");
     return 0;
 }
 
 static int ads122_ring_postenable(struct iio_dev *indio_dev)
 {
     struct ads122_data *data = iio_priv(indio_dev);
+
+    mutex_lock(&data->lock);
+    data->ktime = ktime_set(data->tick / 1000000, (data->tick % 1000000) * 1000);
+    mutex_unlock(&data->lock);
+
     hrtimer_start(&data->timer, data->ktime, HRTIMER_MODE_REL);
-    printk("ads122 ring enable\n");
+
     return 0;
 }
 
 static int ads122_ring_postdisable(struct iio_dev *indio_dev)
 {
     struct ads122_data *data = iio_priv(indio_dev);
-    int ret;
 
+    hrtimer_cancel(&data->timer);
     cancel_work_sync(&data->work);
-
-    ret = hrtimer_cancel(&data->timer);
-    if (ret)
-        printk("the timer was still in use...\n");
-
-    printk("hr Timer module uninstalling\n");
-
     return 0;
 }
 
 static const struct iio_buffer_setup_ops ads122_ring_setup_ops =
 {
-    .preenable = &ads122_ring_preenable,
-    .postenable = &ads122_ring_postenable,
-    .postdisable = &ads122_ring_postdisable,
+    .preenable = ads122_ring_preenable,
+    .postenable = ads122_ring_postenable,
+    .postdisable = ads122_ring_postdisable,
 };
 
 static int ads122_register_ring(struct iio_dev *indio_dev)
@@ -1276,6 +1302,12 @@ static int ads122_register_ring(struct iio_dev *indio_dev)
     indio_dev->setup_ops = &ads122_ring_setup_ops;
 
     return 0;
+}
+
+static void ads122_hrtimer_init(struct hrtimer *timer)
+{
+    hrtimer_init(timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+    timer->function = ads122_hrtimer_callback;
 }
 
 struct i2c_client *ads122_1_client = NULL;
@@ -1320,12 +1352,12 @@ static int ads122_probe(struct i2c_client *client, const struct i2c_device_id *i
             break;
     }
 
-    data->event_channel = ADS122_CHANNELS_NUM;
+    data->event_channel = ADS122_CHANNEL_NUM;
     /*
      * Set default lower and upper threshold to min and max value
      * respectively.
      */
-    for (i = 0; i < ADS122_CHANNELS_NUM; i++) {
+    for (i = 0; i < ADS122_CHANNEL_NUM; i++) {
         int realbits = indio_dev->channels[i].scan_type.realbits;
 
         data->thresh_data[i].low_thresh = -1 << (realbits - 1);
@@ -1343,54 +1375,9 @@ static int ads122_probe(struct i2c_client *client, const struct i2c_device_id *i
 
     regcache_cache_bypass(data->regmap, true);
 
-#if 0
-    ret = devm_iio_triggered_buffer_setup(&client->dev, indio_dev, NULL,
-                                          ads1015_trigger_handler,
-                                          &ads1015_buffer_setup_ops);
-    if (ret < 0) {
-        dev_err(&client->dev, "iio triggered buffer setup failed\n");
-        return ret;
-    }
-
-	if (client->irq) {
-		unsigned long irq_trig =
-			irqd_get_trigger_type(irq_get_irq_data(client->irq));
-		unsigned int cfg_comp_mask = ADS1015_CFG_COMP_QUE_MASK |
-			ADS1015_CFG_COMP_LAT_MASK | ADS1015_CFG_COMP_POL_MASK;
-		unsigned int cfg_comp =
-			ADS1015_CFG_COMP_DISABLE << ADS1015_CFG_COMP_QUE_SHIFT |
-			1 << ADS1015_CFG_COMP_LAT_SHIFT;
-
-		switch (irq_trig) {
-		case IRQF_TRIGGER_LOW:
-			cfg_comp |= ADS1015_CFG_COMP_POL_LOW <<
-					ADS1015_CFG_COMP_POL_SHIFT;
-			break;
-		case IRQF_TRIGGER_HIGH:
-			cfg_comp |= ADS1015_CFG_COMP_POL_HIGH <<
-					ADS1015_CFG_COMP_POL_SHIFT;
-			break;
-		default:
-			return -EINVAL;
-		}
-
-		ret = regmap_update_bits(data->regmap, ADS1015_CFG_REG,
-					cfg_comp_mask, cfg_comp);
-		if (ret)
-			return ret;
-
-		ret = devm_request_threaded_irq(&client->dev, client->irq,
-						NULL, ads1015_event_handler,
-						irq_trig | IRQF_ONESHOT,
-						client->name, indio_dev);
-		if (ret)
-			return ret;
-	}
-#endif
-
     /* reset chip for configure */
     ads122_write_cmd(client, ADS122_CMD_RESET);
-    usleep_range(10000, 10000 + 1);
+    msleep(10);
 
     ret = ads122_set_conv_mode(data, ADS122_SINGLESHOT);
     if (ret) {
@@ -1411,9 +1398,9 @@ static int ads122_probe(struct i2c_client *client, const struct i2c_device_id *i
 
     /* work quene */
     INIT_WORK(&data->work, ads122_work);
-    hrtimer_init(&data->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-    data->timer.function = hrtimer_callback;
-    data->ktime = ktime_set(interval / 1000000, (interval % 1000000) * 1000);
+    /* hr timer init */
+    ads122_hrtimer_init(&data->timer);
+    data->tick = 1000000;
 
     return 0;
 }
