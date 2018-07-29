@@ -29,7 +29,7 @@ enum ads122_channels {
 };
 
 int ads122_sensor_init(enum ads122_dev_no dev_no, struct iio_context *ctx);
-int ads122_buffer_minitor(int *channel, float *value, struct timeval *tv);
-int ads122_read_channel(int chan, float *data, bool blocking);
+int ads122_buffer_poll(enum ads122_dev_no dev_no, float *value, struct timeval *tv);
+int ads122_set_interval(enum ads122_dev_no dev_no, enum ads122_channels chn, unsigned long tick);
 
 #endif  /* BNO055_H */
